@@ -37,6 +37,7 @@ const ChatPage = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentChatRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -121,10 +122,12 @@ const ChatPage = () => {
       chat.participants.forEach(participantId => {
         if (participantId !== user.uid) {
           const unsubscribe = listenToUserStatus(participantId, (profile) => {
-            setOnlineUsers(prev => ({
-              ...prev,
-              [participantId]: profile.online
-            }));
+            if (profile) {  // Add null check for profile
+              setOnlineUsers(prev => ({
+                ...prev,
+                [participantId]: profile.online || false  // Provide default value
+              }));
+            }
           });
           unsubscribers.push(unsubscribe);
         }
@@ -151,16 +154,20 @@ const ChatPage = () => {
 
       // Get initial user profile
       getUserProfile(otherParticipantId).then(profile => {
-        setSelectedChatUser(profile as UserProfile);
+        if (profile) {  // Add null check for profile
+          setSelectedChatUser(profile as UserProfile);
+        }
       });
 
       // Listen to user status changes
       const unsubscribe = listenToUserStatus(otherParticipantId, (profile) => {
-        setSelectedChatUser(profile);
-        setOnlineUsers(prev => ({
-          ...prev,
-          [otherParticipantId]: profile.online
-        }));
+        if (profile) {  // Add null check for profile
+          setSelectedChatUser(profile);
+          setOnlineUsers(prev => ({
+            ...prev,
+            [otherParticipantId]: profile.online || false  // Provide default value
+          }));
+        }
       });
 
       return () => {
@@ -168,6 +175,10 @@ const ChatPage = () => {
       };
     }
   }, [selectedChat, chats, user]);
+
+  useEffect(() => {
+    currentChatRef.current = selectedChat;
+  }, [selectedChat]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -328,20 +339,19 @@ const ChatPage = () => {
   };
 
   const handleUploadSuccess = async (result: any) => {
-    if (!selectedChat) return;
-    console.log(result,"result");
+    const chatId = currentChatRef.current;
+    if (!chatId) return;
 
     try {
       // Send message with file attachment
-      await sendMessage(selectedChat, '', {
-        // type: result.info.resource_type === 'image' ? 'image' : 'file',
+      await sendMessage(chatId, '', {
         type: result.info.format === 'pdf'
-    ? 'file'
-    : result.info.resource_type === 'video'
-    ? 'video'
-    : result.info.resource_type === 'image'
-    ? 'image'
-    : 'file',
+          ? 'file'
+          : result.info.resource_type === 'video'
+            ? 'video'
+            : result.info.resource_type === 'image'
+              ? 'image'
+              : 'file',
         url: result.info.secure_url,
         name: result.info.original_filename,
         size: result.info.bytes,
@@ -353,6 +363,9 @@ const ChatPage = () => {
   };
 
   const startRecording = async () => {
+    if (!selectedChat) return;
+    const currentChatId = selectedChat; // Capture the current chat ID
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream, {
@@ -393,14 +406,12 @@ const ChatPage = () => {
             throw new Error('No URL returned from upload');
           }
 
-          // Send voice message
-          if (selectedChat) {
-            await sendMessage(selectedChat, '', {
-              type: 'voice',
-              url: data.secure_url,
-              duration: Math.round(audioBlob.size / 16000), // Approximate duration in seconds
-            });
-          }
+          // Send voice message to the captured chat ID
+          await sendMessage(currentChatId, '', {
+            type: 'voice',
+            url: data.secure_url,
+            duration: Math.round(audioBlob.size / 16000), // Approximate duration in seconds
+          });
         } catch (error) {
           console.error('Error uploading voice message:', error);
           alert(`Failed to upload voice message: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -557,7 +568,7 @@ const ChatPage = () => {
                         </div>
                       )}
                     </div>
-                    {selectedChatUser?.online && (
+                    {selectedChatUser && selectedChatUser.online && (
                       <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                     )}
                   </div>
@@ -689,16 +700,25 @@ const ChatPage = () => {
                     uploadPreset="chat_attachments"
                     onSuccess={handleUploadSuccess}
                     options={{
-                      // resourceType: "raw", // Important for PDFs, ZIPs, etc.
-                      // multiple: false,
-                      // maxFiles: 1,
                       resourceType: "auto",
+                      clientAllowedFormats: ["image", "video", "pdf", "audio"],
+                      maxFileSize: 10000000, // 10MB
+                      showPoweredBy: false,
+                      showSkipCropButton: true,
+                      sources: ["local", "camera", "url"],
+                      multiple: false,
                     }}
                   >
                     {({ open }) => (
                       <button
                         type="button"
-                        onClick={() => open()}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (currentChatRef.current) {
+                            open();
+                          }
+                        }}
                         className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                       >
                         <PaperClipIcon className="w-6 h-6" />

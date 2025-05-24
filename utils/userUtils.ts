@@ -98,14 +98,35 @@ export const initializePresence = () => {
       await setUserOnlineStatus(true);
 
       // Set up offline status when user disconnects
-      await onDisconnect(dbRef).set({
+      await onDisconnect(dbRef).update({
         online: false,
         lastSeen: serverTimestamp(),
       });
 
       // Handle window/tab close
       window.addEventListener('beforeunload', async () => {
-        await setUserOnlineStatus(false);
+        try {
+          await setUserOnlineStatus(false);
+        } catch (error) {
+          console.error('Error setting offline status:', error);
+        }
+      });
+
+      // Handle visibility change
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'hidden') {
+          try {
+            await setUserOnlineStatus(false);
+          } catch (error) {
+            console.error('Error setting offline status:', error);
+          }
+        } else {
+          try {
+            await setUserOnlineStatus(true);
+          } catch (error) {
+            console.error('Error setting online status:', error);
+          }
+        }
       });
     }
   });
@@ -126,8 +147,14 @@ export const cleanupPresence = async () => {
       lastSeen: new Date(),
     });
 
-    // Remove from Realtime Database
-    await remove(dbRef);
+    // Update Realtime Database
+    await set(dbRef, {
+      online: false,
+      lastSeen: serverTimestamp(),
+    });
+
+    // Remove disconnect handler
+    await onDisconnect(dbRef).cancel();
   } catch (error) {
     console.error('Error cleaning up presence:', error);
   }
