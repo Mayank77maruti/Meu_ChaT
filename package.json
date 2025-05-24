@@ -11,11 +11,13 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "crypto-js": "^4.2.0",
+    "emoji-picker-react": "^4.12.2",
     "firebase": "^11.8.1",
     "next": "15.1.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-firebase-hooks": "^5.1.1"
+    "react-firebase-hooks": "^5.1.1",
+    "tailwind-scrollbar-hide": "^2.0.0"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",

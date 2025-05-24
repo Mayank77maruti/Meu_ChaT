@@ -5,12 +5,14 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon } from '@heroicons/react/24/outline';
-import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile } from '../../utils/chatUtils';
+import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
 import { listenToUserStatus } from '../../utils/userUtils';
 import { UserProfile } from '../../utils/userUtils';
 import Sidebar from '../../components/Sidebar';
+import EmojiPicker from '../../components/EmojiPicker';
+import { Theme } from 'emoji-picker-react';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -27,6 +29,7 @@ const ChatPage = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
   const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
+  const [selectedReactions, setSelectedReactions] = useState<{messageId: string, reactions: {[emoji: string]: string[]}} | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -181,6 +184,23 @@ const ChatPage = () => {
     }
   };
 
+  const handleReaction = async (messageId: string, emoji: string) => {
+    if (!selectedChat || !user) return;
+    await addReaction(selectedChat, messageId, emoji, user.uid);
+    // Close the popup if it's open
+    if (selectedReactions?.messageId === messageId) {
+      setSelectedReactions(null);
+    }
+  };
+
+  const handleReactionClick = (messageId: string, reactions: {[emoji: string]: string[]}) => {
+    setSelectedReactions({ messageId, reactions });
+  };
+
+  const handleCloseReactions = () => {
+    setSelectedReactions(null);
+  };
+
   // Add this function to format timestamps
   const formatTimestamp = (timestamp: Date | undefined) => {
     if (!timestamp) return '';
@@ -326,40 +346,113 @@ const ChatPage = () => {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
                 {messages.map((message) => {
                   const isGroupChat = chats.find(c => c.id === selectedChat)?.isGroup;
                   const sender = chatParticipants[message.senderId];
+                  const reactions = message.reactions || {};
+                  const reactionCount = Object.values(reactions).reduce((acc, users) => acc + users.length, 0);
+                  const lastEmoji = Object.keys(reactions).pop();
+                  const isOwnMessage = message.senderId === user?.uid;
                   
                   return (
                     <div
                       key={message.id}
-                      className={`flex ${message.senderId === user?.uid ? 'justify-end' : 'justify-start'}`}
+                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className="flex flex-col max-w-[70%]">
-                        {isGroupChat && message.senderId !== user?.uid && (
+                      <div className="flex flex-col max-w-[85%] group">
+                        {isGroupChat && !isOwnMessage && (
                           <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                             {sender?.displayName || 'Unknown User'}
                           </p>
                         )}
-                        <div
-                          className={`rounded-lg px-4 py-2 ${
-                            message.senderId === user?.uid
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-                          }`}
-                        >
-                          <p className="text-sm">{message.text}</p>
-                          <p className="text-xs mt-1 opacity-70">
-                            {formatTimestamp(message.timestamp)}
-                          </p>
+                        <div className="relative">
+                          <div
+                            className={`rounded-lg px-4 py-2 break-words ${
+                              isOwnMessage
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
+                            }`}
+                          >
+                            <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                            <p className="text-xs mt-1 opacity-70">
+                              {formatTimestamp(message.timestamp)}
+                            </p>
+                          </div>
+                          
+                          {/* Reaction Button - Only show for other users' messages */}
+                          {!isOwnMessage && (
+                            <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                              <EmojiPicker
+                                onSelect={(emoji) => handleReaction(message.id, emoji)}
+                                position="bottom"
+                                theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
+                              />
+                            </div>
+                          )}
                         </div>
+
+                        {/* Compact Reactions Display */}
+                        {reactionCount > 0 && (
+                          <div className="mt-1 flex justify-end">
+                            <button
+                              onClick={() => handleReactionClick(message.id, reactions)}
+                              className="px-2 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200"
+                            >
+                              {lastEmoji} {reactionCount}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })}
                 <div ref={messagesEndRef} />
               </div>
+
+              {/* Reactions Popup */}
+              {selectedReactions && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCloseReactions}>
+                  <div 
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 max-w-sm w-full mx-4"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-medium text-gray-900 dark:text-white">Reactions</h3>
+                      <button
+                        onClick={handleCloseReactions}
+                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {Object.entries(selectedReactions.reactions).map(([emoji, userIds]) => (
+                        <div key={emoji} className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xl">{emoji}</span>
+                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                              {userIds.length} {userIds.length === 1 ? 'reaction' : 'reactions'}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleReaction(selectedReactions.messageId, emoji)}
+                            className={`px-2 py-1 rounded-full text-xs ${
+                              userIds.includes(user?.uid || '')
+                                ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                            }`}
+                          >
+                            {userIds.includes(user?.uid || '') ? 'Remove' : 'Add'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Message Input */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
