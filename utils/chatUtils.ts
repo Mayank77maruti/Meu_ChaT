@@ -17,12 +17,18 @@ import {
 // Types
 export interface Message {
   id: string;
-  text: string;
+  chatId: string;
   senderId: string;
-  timestamp: Date;
+  text: string;
+  timestamp: number;
   read: boolean;
-  reactions?: {
-    [emoji: string]: string[]; // emoji -> array of user IDs who reacted
+  reactions?: { [emoji: string]: string[] };
+  attachment?: {
+    type: 'image' | 'file' | 'voice' | 'video';
+    url: string;
+    name?: string;
+    size?: number;
+    duration?: number;
   };
 }
 
@@ -86,7 +92,13 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
 };
 
 
-export const sendMessage = async (chatId: string, text: string) => {
+export const sendMessage = async (chatId: string, text: string, attachment?: {
+  type: 'image' | 'file' | 'voice' | 'video';
+  url: string;
+  name?: string;
+  size?: number;
+  duration?: number;
+}) => {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
 
@@ -95,11 +107,12 @@ export const sendMessage = async (chatId: string, text: string) => {
     senderId: currentUser.uid,
     timestamp: serverTimestamp(),
     read: false,
-    reactions: {}
+    reactions: {},
+    attachment
   });
 
   await updateDoc(doc(db, 'chats', chatId), {
-    lastMessage: text,
+    lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
     lastMessageTime: serverTimestamp(),
   });
 
@@ -120,11 +133,13 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
       const data = doc.data();
       messages.push({
         id: doc.id,
+        chatId,
         text: data.text,
         senderId: data.senderId,
-        timestamp: data.timestamp?.toDate(),
-        read: data.read,
-        reactions: data.reactions || {}
+        timestamp: data.timestamp?.toDate().getTime() || Date.now(),
+        read: data.read || false,
+        reactions: data.reactions || {},
+        attachment: data.attachment
       });
     });
     callback(messages);
