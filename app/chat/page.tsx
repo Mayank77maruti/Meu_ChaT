@@ -7,6 +7,8 @@ import { SunIcon, MoonIcon, Cog6ToothIcon } from '@heroicons/react/24/outline';
 import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
+import { listenToUserStatus } from '../../utils/userUtils';
+import { UserProfile } from '../../utils/userUtils';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -21,6 +23,8 @@ const ChatPage = () => {
   const [chatParticipants, setChatParticipants] = useState<{[key: string]: any}>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
+  const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -94,6 +98,56 @@ const ChatPage = () => {
       unsubscribeMessages();
     };
   }, [selectedChat]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribers: (() => void)[] = [];
+
+    // Listen to status of all chat participants
+    chats.forEach(chat => {
+      chat.participants.forEach(participantId => {
+        if (participantId !== user.uid) {
+          const unsubscribe = listenToUserStatus(participantId, (profile) => {
+            setOnlineUsers(prev => ({
+              ...prev,
+              [participantId]: profile.online
+            }));
+          });
+          unsubscribers.push(unsubscribe);
+        }
+      });
+    });
+
+    return () => {
+      unsubscribers.forEach(unsubscribe => unsubscribe());
+    };
+  }, [chats, user]);
+
+  useEffect(() => {
+    if (!selectedChat || !user) return;
+
+    const otherParticipantId = chats.find(c => c.id === selectedChat)?.participants.find(id => id !== user.uid);
+    if (!otherParticipantId) return;
+
+    // Get initial user profile
+    getUserProfile(otherParticipantId).then(profile => {
+      setSelectedChatUser(profile as UserProfile);
+    });
+
+    // Listen to user status changes
+    const unsubscribe = listenToUserStatus(otherParticipantId, (profile) => {
+      setSelectedChatUser(profile);
+      setOnlineUsers(prev => ({
+        ...prev,
+        [otherParticipantId]: profile.online
+      }));
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [selectedChat, chats, user]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -177,6 +231,7 @@ const ChatPage = () => {
           {chats.map((chat) => {
             const otherParticipantId = chat.participants.find(id => id !== user?.uid);
             const otherParticipant = chatParticipants[otherParticipantId || ''];
+            const isOnline = onlineUsers[otherParticipantId || ''];
             
             return (
               <div
@@ -187,14 +242,19 @@ const ChatPage = () => {
                 }`}
               >
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
-                    {otherParticipant?.photoURL && (
-                      <img
-                        src={otherParticipant.photoURL}
-                        alt={otherParticipant.displayName}
-                        className="w-full h-full rounded-full"
-                      />
-                    )}
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+                      {otherParticipant?.photoURL && (
+                        <img
+                          src={otherParticipant.photoURL}
+                          alt={otherParticipant.displayName}
+                          className="w-full h-full rounded-full"
+                        />
+                      )}
+                    </div>
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                      isOnline ? 'bg-green-500' : 'bg-gray-400'
+                    }`} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 dark:text-white truncate">
@@ -235,31 +295,28 @@ const ChatPage = () => {
                     </svg>
                   </button>
                 )}
-                {(() => {
-                  const otherParticipantId = chats.find(c => c.id === selectedChat)?.participants.find(id => id !== user.uid);
-                  const otherParticipant = chatParticipants[otherParticipantId || ''];
-                  return (
-                    <>
-                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
-                        {otherParticipant?.photoURL && (
-                          <img
-                            src={otherParticipant.photoURL}
-                            alt={otherParticipant.displayName}
-                            className="w-full h-full rounded-full"
-                          />
-                        )}
-                      </div>
-                      <div>
-                        <h2 className="font-semibold text-gray-800 dark:text-white">
-                          {otherParticipant?.displayName || 'Unknown User'}
-                        </h2>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                          {otherParticipant?.online ? 'Online' : 'Offline'}
-                        </p>
-                      </div>
-                    </>
-                  );
-                })()}
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+                    {selectedChatUser?.photoURL && (
+                      <img
+                        src={selectedChatUser.photoURL}
+                        alt={selectedChatUser.displayName}
+                        className="w-full h-full rounded-full"
+                      />
+                    )}
+                  </div>
+                  <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                    selectedChatUser?.online ? 'bg-green-500' : 'bg-gray-400'
+                  }`} />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-gray-800 dark:text-white">
+                    {selectedChatUser?.displayName || 'Unknown User'}
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {selectedChatUser?.online ? 'Online' : 'Offline'}
+                  </p>
+                </div>
               </div>
             </div>
 
