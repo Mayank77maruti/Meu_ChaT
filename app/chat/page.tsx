@@ -4,7 +4,7 @@ import { auth } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon } from '@heroicons/react/24/outline';
+import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon } from '@heroicons/react/24/outline';
 import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
@@ -13,6 +13,7 @@ import { UserProfile } from '../../utils/userUtils';
 import Sidebar from '../../components/Sidebar';
 import EmojiPicker from '../../components/EmojiPicker';
 import { Theme } from 'emoji-picker-react';
+import { CldUploadWidget } from 'next-cloudinary';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -30,6 +31,12 @@ const ChatPage = () => {
   const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
   const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
   const [selectedReactions, setSelectedReactions] = useState<{messageId: string, reactions: {[emoji: string]: string[]}} | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -201,26 +208,232 @@ const ChatPage = () => {
     setSelectedReactions(null);
   };
 
-  // Add this function to format timestamps
-  const formatTimestamp = (timestamp: Date | undefined) => {
-    if (!timestamp) return '';
-    const now = new Date();
-    const messageDate = new Date(timestamp);
-    
-    // If message is from today, show time only
-    if (messageDate.toDateString() === now.toDateString()) {
-      return messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const renderMessageContent = (message: Message) => {
+    if (message.attachment) {
+      const attachment = message.attachment;
+      switch (attachment.type) {
+        case 'image':
+          return (
+            <div className="mt-2">
+              <img
+                src={attachment.url}
+                alt="Shared image"
+                className="max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => window.open(attachment.url, '_blank')}
+              />
+            </div>
+          );
+        case 'file':
+          return (
+            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <PaperClipIcon className="w-5 h-5 text-gray-500" />
+              <a
+                href={attachment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:underline"
+              >
+                {attachment.name || 'Download file'}
+              </a>
+              {attachment.size && (
+                <span className="text-sm text-gray-500">
+                  ({(attachment.size / 1024).toFixed(1)} KB)
+                </span>
+              )}
+            </div>
+          );
+        case 'video':
+          return (
+            <div className="mt-2">
+              <video
+                controls
+                className="max-w-sm rounded-lg"
+                src={attachment.url}
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+          );
+        case 'voice':
+          return (
+            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <button
+                onClick={() => handlePlayAudio(attachment.url)}
+                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
+              >
+                {playingAudio === attachment.url ? (
+                  <PauseIcon className="w-5 h-5 text-gray-500" />
+                ) : (
+                  <PlayIcon className="w-5 h-5 text-gray-500" />
+                )}
+              </button>
+              <div className="flex-1">
+                <div className="h-1 bg-gray-300 dark:bg-gray-600 rounded-full">
+                  <div
+                    className="h-full bg-blue-500 rounded-full"
+                    style={{
+                      width: audioRef.current
+                        ? `${(audioRef.current.currentTime / audioRef.current.duration) * 100}%`
+                        : '0%',
+                    }}
+                  />
+                </div>
+                {attachment.duration && (
+                  <span className="text-sm text-gray-500">
+                    {attachment.duration}s
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        default:
+          return null;
+      }
     }
+
+    // Check for URLs in the message text
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urls = message.text.match(urlRegex);
     
-    // If message is from this year, show date and time
-    if (messageDate.getFullYear() === now.getFullYear()) {
-      return messageDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
-             messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (urls) {
+      return (
+        <div>
+          <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+          {urls.map((url, index) => (
+            <div key={index} className="mt-2 max-w-sm rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                <div className="p-3">
+                  <p className="text-sm font-medium text-blue-500 truncate">{url}</p>
+                  <p className="text-xs text-gray-500 mt-1">Click to open link</p>
+                </div>
+              </a>
+            </div>
+          ))}
+        </div>
+      );
     }
-    
-    // If message is from a different year, show full date and time
-    return messageDate.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' +
-           messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return <p className="text-sm whitespace-pre-wrap">{message.text}</p>;
+  };
+
+  const formatTimestamp = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const handleUploadSuccess = async (result: any) => {
+    if (!selectedChat) return;
+    console.log(result,"result");
+
+    try {
+      // Send message with file attachment
+      await sendMessage(selectedChat, '', {
+        // type: result.info.resource_type === 'image' ? 'image' : 'file',
+        type: result.info.format === 'pdf'
+    ? 'file'
+    : result.info.resource_type === 'video'
+    ? 'video'
+    : result.info.resource_type === 'image'
+    ? 'image'
+    : 'file',
+        url: result.info.secure_url,
+        name: result.info.original_filename,
+        size: result.info.bytes,
+      });
+    } catch (error) {
+      console.error('Error sending message with attachment:', error);
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
+        setAudioChunks(chunks);
+
+        try {
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'voice-message.webm');
+          formData.append('upload_preset', 'chat_attachments');
+
+          const response = await fetch(
+            `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/video/upload`,
+            {
+              method: 'POST',
+              body: formData,
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error('Failed to upload voice message');
+          }
+
+          const data = await response.json();
+          
+          if (!data.secure_url) {
+            throw new Error('No URL returned from upload');
+          }
+
+          // Send voice message
+          if (selectedChat) {
+            await sendMessage(selectedChat, '', {
+              type: 'voice',
+              url: data.secure_url,
+              duration: Math.round(audioBlob.size / 16000), // Approximate duration in seconds
+            });
+          }
+        } catch (error) {
+          console.error('Error uploading voice message:', error);
+          alert(`Failed to upload voice message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      alert(`Failed to start recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+  };
+
+  const handlePlayAudio = (url: string) => {
+    if (playingAudio === url) {
+      audioRef.current?.pause();
+      setPlayingAudio(null);
+    } else {
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play();
+        setPlayingAudio(url);
+      }
+    }
   };
 
   if (loading) {
@@ -387,19 +600,19 @@ const ChatPage = () => {
                                 : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
                             }`}
                           >
-                            <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                            {renderMessageContent(message)}
                             <p className="text-xs mt-1 opacity-70">
                               {formatTimestamp(message.timestamp)}
                             </p>
                           </div>
                           
-                          {/* Reaction Button - Only show for other users' messages */}
+                          {/* Reaction Button */}
                           {!isOwnMessage && (
                             <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                               <EmojiPicker
                                 onSelect={(emoji) => handleReaction(message.id, emoji)}
-                                position="bottom"
                                 theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
+                                position="bottom"
                               />
                             </div>
                           )}
@@ -421,6 +634,7 @@ const ChatPage = () => {
                   );
                 })}
                 <div ref={messagesEndRef} />
+                <audio ref={audioRef} className="hidden" />
               </div>
 
               {/* Reactions Popup */}
@@ -470,6 +684,41 @@ const ChatPage = () => {
               {/* Message Input */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                 <div className="flex space-x-4">
+                  <CldUploadWidget
+                    uploadPreset="chat_attachments"
+                    onSuccess={handleUploadSuccess}
+                    options={{
+                      // resourceType: "raw", // Important for PDFs, ZIPs, etc.
+                      // multiple: false,
+                      // maxFiles: 1,
+                      resourceType: "auto",
+                    }}
+                  >
+                    {({ open }) => (
+                      <button
+                        type="button"
+                        onClick={() => open()}
+                        className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        <PaperClipIcon className="w-6 h-6" />
+                      </button>
+                    )}
+                  </CldUploadWidget>
+                  <button
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`p-2 ${
+                      isRecording 
+                        ? 'text-red-500 hover:text-red-600' 
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <StopIcon className="w-6 h-6" />
+                    ) : (
+                      <MicrophoneIcon className="w-6 h-6" />
+                    )}
+                  </button>
                   <input
                     type="text"
                     value={newMessage}
