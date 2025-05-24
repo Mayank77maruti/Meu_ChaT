@@ -21,6 +21,9 @@ export interface Message {
   senderId: string;
   timestamp: Date;
   read: boolean;
+  reactions?: {
+    [emoji: string]: string[]; // emoji -> array of user IDs who reacted
+  };
 }
 
 export interface Chat {
@@ -28,6 +31,10 @@ export interface Chat {
   participants: string[];
   lastMessage?: string;
   lastMessageTime?: Date;
+  isGroup?: boolean;
+  name?: string;
+  createdBy?: string;
+  createdAt?: Date;
 }
 
 // Create a new chat...................................
@@ -62,6 +69,10 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
         participants: data.participants,
         lastMessage: data.lastMessage,
         lastMessageTime: data.lastMessageTime?.toDate(),
+        isGroup: data.isGroup || false,
+        name: data.name,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate(),
       });
     });
     // Sort chats client-side
@@ -79,14 +90,13 @@ export const sendMessage = async (chatId: string, text: string) => {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
 
-  const messageRef = await addDoc(collection(db, 'messages'), {
-    chatId,
+  const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), {
     text,
     senderId: currentUser.uid,
     timestamp: serverTimestamp(),
     read: false,
+    reactions: {}
   });
-
 
   await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: text,
@@ -98,10 +108,10 @@ export const sendMessage = async (chatId: string, text: string) => {
 
 
 export const getMessages = (chatId: string, callback: (messages: Message[]) => void) => {
-  const messagesRef = collection(db, 'messages');
+  const messagesRef = collection(db, 'chats', chatId, 'messages');
   const q = query(
     messagesRef,
-    where('chatId', '==', chatId)
+    orderBy('timestamp', 'asc')
   );
 
   return onSnapshot(q, (snapshot) => {
@@ -114,12 +124,8 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         senderId: data.senderId,
         timestamp: data.timestamp?.toDate(),
         read: data.read,
+        reactions: data.reactions || {}
       });
-    });
-    // Sort messages by timestamp on the client side
-    messages.sort((a, b) => {
-      if (!a.timestamp || !b.timestamp) return 0;
-      return a.timestamp.getTime() - b.timestamp.getTime();
     });
     callback(messages);
   });
@@ -136,4 +142,30 @@ export const markMessageAsRead = async (messageId: string) => {
 export const getUserProfile = async (userId: string) => {
   const userDoc = await getDoc(doc(db, 'users', userId));
   return userDoc.data();
+};
+
+export const addReaction = async (chatId: string, messageId: string, emoji: string, userId: string) => {
+  const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+  const messageDoc = await getDoc(messageRef);
+  
+  if (!messageDoc.exists()) return;
+
+  const message = messageDoc.data();
+  const reactions = message.reactions || {};
+  const userReactions = reactions[emoji] || [];
+
+  // If user already reacted with this emoji, remove their reaction
+  if (userReactions.includes(userId)) {
+    const updatedReactions = userReactions.filter((id: string) => id !== userId);
+    if (updatedReactions.length === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = updatedReactions;
+    }
+  } else {
+    // Add user's reaction
+    reactions[emoji] = [...userReactions, userId];
+  }
+
+  await updateDoc(messageRef, { reactions });
 }; 
