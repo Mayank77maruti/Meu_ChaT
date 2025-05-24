@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
 import { UserProfile } from '../utils/userUtils';
+import IncomingCallNotification from './IncomingCallNotification';
 
 interface CallInterfaceProps {
   chatId: string;
@@ -27,6 +28,8 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
   const [isCallEnded, setIsCallEnded] = useState(false);
   const [isInitiator, setIsInitiator] = useState(false);
   const [isCallActive, setIsCallActive] = useState(false);
+  const [showIncomingCall, setShowIncomingCall] = useState(false);
+  const [incomingCallData, setIncomingCallData] = useState<any>(null);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -151,16 +154,23 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
           const data = snapshot.val();
           if (!data) return;
 
+          console.log('Received call signal:', data.type);
+          
           // Store initial call data
           if (!initialCallData) {
             initialCallData = data;
-            console.log('Initial call data:', data);
+            console.log('Stored initial call data:', initialCallData);
+          }
+          
+          if (data.type === 'offer' && !isInitiator) {
+            console.log('Received incoming call offer');
+            setIncomingCallData(data);
+            setShowIncomingCall(true);
+            return;
           }
 
-          console.log('Received call signal:', data.type);
-          
-          // Only process end-call if it's not the initial data
-          if (data.type === 'end-call' && initialCallData !== data) {
+          // Only process end-call if it's different from initial data
+          if (data.type === 'end-call' && data !== initialCallData) {
             console.log('Received end-call signal, cleaning up...');
             isCleaningUp = true;
             handleEndCall();
@@ -169,9 +179,7 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
 
           if (isCallEnded) return;
 
-          if (data.type === 'offer' && !isInitiator) {
-            await handleIncomingCall(data);
-          } else if (data.type === 'answer' && isInitiator) {
+          if (data.type === 'answer' && isInitiator) {
             await handleCallAnswer(data);
           } else if (data.type === 'ice-candidate') {
             await handleIceCandidate(data);
@@ -188,17 +196,21 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
       }
     };
 
-    initializeMedia();
+    if (!isIncoming) {
+      initializeMedia();
+    }
 
     return () => {
-      console.log('Component unmounting, cleaning up...');
-      isCleaningUp = true;
-      if (unsubscribe) {
-        unsubscribe();
+      if (!isCleaningUp) {
+        console.log('Component unmounting, cleaning up...');
+        isCleaningUp = true;
+        if (unsubscribe) {
+          unsubscribe();
+        }
+        cleanup();
       }
-      cleanup();
     };
-  }, [chatId, isInitiator, callType]);
+  }, [chatId, isInitiator, callType, isIncoming]);
 
   // Add a debug effect to monitor state changes
   useEffect(() => {
@@ -224,32 +236,6 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
     onEndCall();
   };
 
-  const handleIncomingCall = async (data: any) => {
-    if (!peerConnectionRef.current) return;
-
-    try {
-      console.log('Handling incoming call...');
-      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
-      const answer = await peerConnectionRef.current.createAnswer();
-      await peerConnectionRef.current.setLocalDescription(answer);
-
-      // Update call status to accepted
-      set(ref(rtdb, `calls/${chatId}`), {
-        ...data,
-        type: 'answer',
-        answer,
-        status: 'accepted',
-        timestamp: Date.now()
-      });
-
-      setIsCallAccepted(true);
-      console.log('Call accepted and answer sent');
-    } catch (error) {
-      console.error('Error handling incoming call:', error);
-      handleEndCall();
-    }
-  };
-
   const handleCallAnswer = async (data: any) => {
     if (!peerConnectionRef.current) return;
 
@@ -273,6 +259,8 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
   };
 
   const cleanup = () => {
+    if (isCallEnded) return;
+    
     console.log('Cleaning up media and connections...');
     if (localStream) {
       localStream.getTracks().forEach(track => {
@@ -362,6 +350,95 @@ const CallInterface: React.FC<CallInterfaceProps> = ({
       handleEndCall();
     }
   };
+
+  // Add this new function to handle incoming call acceptance
+  const handleAcceptCall = async () => {
+    if (!incomingCallData) return;
+    
+    try {
+      console.log('Accepting incoming call...');
+      setShowIncomingCall(false);
+      setIsInitiator(false);
+      
+      // Initialize media and handle the call
+      const initializeMediaForIncomingCall = async () => {
+        try {
+          console.log('Starting media initialization for incoming call...');
+          const constraints = {
+            audio: true,
+            video: incomingCallData.callType === 'video' ? {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: 'user'
+            } : false
+          };
+
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          setLocalStream(stream);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+
+          const pc = new RTCPeerConnection(servers);
+          peerConnectionRef.current = pc;
+
+          stream.getTracks().forEach(track => {
+            pc.addTrack(track, stream);
+          });
+
+          pc.ontrack = (event) => {
+            const [remoteStream] = event.streams;
+            setRemoteStream(remoteStream);
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = remoteStream;
+            }
+          };
+
+          await pc.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          set(ref(rtdb, `calls/${chatId}`), {
+            ...incomingCallData,
+            type: 'answer',
+            answer,
+            status: 'accepted',
+            timestamp: Date.now()
+          });
+
+          setIsCallAccepted(true);
+          setIsCallActive(true);
+        } catch (error) {
+          console.error('Error initializing media for incoming call:', error);
+          handleEndCall();
+        }
+      };
+
+      await initializeMediaForIncomingCall();
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      handleEndCall();
+    }
+  };
+
+  // Add this new function to handle incoming call rejection
+  const handleRejectCall = () => {
+    console.log('Rejecting incoming call...');
+    setShowIncomingCall(false);
+    handleEndCall();
+  };
+
+  // Render the incoming call notification if needed
+  if (showIncomingCall && incomingCallData) {
+    return (
+      <IncomingCallNotification
+        caller={otherUser!}
+        callType={incomingCallData.callType}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
