@@ -102,14 +102,19 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
 
-  const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), {
+  const messageData: any = {
     text,
     senderId: currentUser.uid,
     timestamp: serverTimestamp(),
     read: false,
     reactions: {},
-    attachment
-  });
+  };
+
+  if (attachment) {
+    messageData.attachment = attachment;
+  }
+
+  const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
 
   await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),

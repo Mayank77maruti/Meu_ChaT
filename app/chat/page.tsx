@@ -188,6 +188,7 @@ const ChatPage = () => {
       setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
