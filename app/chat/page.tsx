@@ -4,7 +4,7 @@ import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon } from '@heroicons/react/24/outline';
+import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon } from '@heroicons/react/24/outline';
 import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
@@ -16,6 +16,8 @@ import { Theme } from 'emoji-picker-react';
 import { CldUploadWidget } from 'next-cloudinary';
 import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
+import CallInterface from '../../components/CallInterface';
+import CallNotification from '../../components/CallNotification';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -44,6 +46,14 @@ const ChatPage = () => {
   const [typingUsers, setTypingUsers] = useState<{[key: string]: boolean}>({});
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const rtdb = getDatabase();
+  const [isInCall, setIsInCall] = useState(false);
+  const [isCallIncoming, setIsCallIncoming] = useState(false);
+  const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{
+    caller: UserProfile;
+    type: 'audio' | 'video';
+    chatId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -129,10 +139,10 @@ const ChatPage = () => {
         if (participantId !== user.uid) {
           const unsubscribe = listenToUserStatus(participantId, (profile) => {
             if (profile) {  // Add null check for profile
-              setOnlineUsers(prev => ({
-                ...prev,
+            setOnlineUsers(prev => ({
+              ...prev,
                 [participantId]: profile.online || false  // Provide default value
-              }));
+            }));
             }
           });
           unsubscribers.push(unsubscribe);
@@ -156,21 +166,21 @@ const ChatPage = () => {
       setSelectedChatUser(null);
     } else {
       const otherParticipantId = currentChat.participants.find(id => id !== user.uid);
-      if (!otherParticipantId) return;
+    if (!otherParticipantId) return;
 
-      // Get initial user profile
-      getUserProfile(otherParticipantId).then(profile => {
+    // Get initial user profile
+    getUserProfile(otherParticipantId).then(profile => {
         if (profile) {  // Add null check for profile
-          setSelectedChatUser(profile as UserProfile);
+      setSelectedChatUser(profile as UserProfile);
         }
-      });
+    });
 
-      // Listen to user status changes
-      const unsubscribe = listenToUserStatus(otherParticipantId, (profile) => {
+    // Listen to user status changes
+    const unsubscribe = listenToUserStatus(otherParticipantId, (profile) => {
         if (profile) {  // Add null check for profile
-          setSelectedChatUser(profile);
-          setOnlineUsers(prev => ({
-            ...prev,
+      setSelectedChatUser(profile);
+      setOnlineUsers(prev => ({
+        ...prev,
             [otherParticipantId]: profile.online || false  // Provide default value
           }));
         }
@@ -527,6 +537,78 @@ const ChatPage = () => {
     }
   };
 
+  // Add call listeners
+  useEffect(() => {
+    if (!user) return;
+
+    const callsRef = ref(rtdb, 'calls');
+    onValue(callsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+
+      // Check for incoming calls
+      Object.entries(data).forEach(([chatId, callData]: [string, any]) => {
+        if (callData.type === 'offer' && callData.to === user.uid) {
+          // Get caller's profile
+          getUserProfile(callData.from).then((profile) => {
+            if (profile) {
+              setIncomingCall({
+                caller: {
+                  uid: callData.from,
+                  displayName: profile.displayName || 'Unknown User',
+                  photoURL: profile.photoURL,
+                  online: profile.online || false
+                },
+                type: callData.callType || 'video',
+                chatId,
+              });
+            }
+          });
+        }
+      });
+    });
+
+    return () => {
+      // Cleanup
+      set(ref(rtdb, 'calls'), null);
+    };
+  }, [user]);
+
+  const handleStartCall = (type: 'audio' | 'video') => {
+    if (!selectedChat || !user || !selectedChatUser) return;
+    setCallType(type);
+    setIsInCall(true);
+  };
+
+  const handleAcceptCall = () => {
+    if (!incomingCall) return;
+    setSelectedChat(incomingCall.chatId);
+    setCallType(incomingCall.type);
+    setIsInCall(true);
+    setIncomingCall(null);
+  };
+
+  const handleRejectCall = () => {
+    if (!incomingCall) return;
+    set(ref(rtdb, `calls/${incomingCall.chatId}`), {
+      type: 'end-call',
+      from: user?.uid,
+      to: incomingCall.caller.uid,
+    });
+    setIncomingCall(null);
+  };
+
+  const handleEndCall = () => {
+    if (!selectedChat) return;
+    set(ref(rtdb, `calls/${selectedChat}`), {
+      type: 'end-call',
+      from: user?.uid,
+      to: selectedChatUser?.uid,
+    });
+    setIsInCall(false);
+    setCallType(null);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
@@ -547,97 +629,97 @@ const ChatPage = () => {
       {/* Main Chat Area */}
       <div className="flex-1 flex">
         {/* Chat List */}
-        <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-          ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
-              <button
-                onClick={toggleDarkMode}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-                aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {isDarkMode ? (
-                  <SunIcon className="h-5 w-5 text-gray-200" />
-                ) : (
-                  <MoonIcon className="h-5 w-5 text-gray-600" />
-                )}
-              </button>
-            </div>
-            <UserSearch />
+      <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
+        ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
+            <button
+              onClick={toggleDarkMode}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+              aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {isDarkMode ? (
+                <SunIcon className="h-5 w-5 text-gray-200" />
+              ) : (
+                <MoonIcon className="h-5 w-5 text-gray-600" />
+              )}
+            </button>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {chats.map((chat) => {
+          <UserSearch />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {chats.map((chat) => {
               const isGroupChat = chat.isGroup;
               const otherParticipantId = !isGroupChat ? chat.participants.find(id => id !== user?.uid) : null;
               const otherParticipant = !isGroupChat ? chatParticipants[otherParticipantId || ''] : null;
               const isOnline = !isGroupChat ? onlineUsers[otherParticipantId || ''] : false;
-              
-              return (
-                <div
-                  key={chat.id}
-                  onClick={() => setSelectedChat(chat.id)}
-                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
-                    selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+            
+            return (
+              <div
+                key={chat.id}
+                onClick={() => setSelectedChat(chat.id)}
+                className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
+                  selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
+                }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                         {isGroupChat ? (
                           <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
                         ) : otherParticipant?.photoURL ? (
-                          <img
-                            src={otherParticipant.photoURL}
+                        <img
+                          src={otherParticipant.photoURL}
                             alt={otherParticipant.displayName || 'User'}
                             className="w-full h-full rounded-full object-cover"
-                          />
+                        />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
                             {otherParticipant?.displayName?.[0]?.toUpperCase() || '?'}
                           </div>
-                        )}
-                      </div>
-                      {!isGroupChat && (
-                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
-                          isOnline ? 'bg-green-500' : 'bg-gray-400'
-                        }`} />
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
+                      {!isGroupChat && (
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                      isOnline ? 'bg-green-500' : 'bg-gray-400'
+                    }`} />
+                      )}
+                  </div>
+                  <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                        {chat.lastMessage || 'No messages yet'}
-                      </p>
-                    </div>
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                      {chat.lastMessage || 'No messages yet'}
+                    </p>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
+      </div>
 
         {/* Chat Messages */}
-        <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
-          {selectedChat ? (
-            <>
-              {/* Chat Header */}
-              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
-                <div className="flex items-center space-x-3">
-                  {isMobile && (
-                    <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-                      <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                      </svg>
-                    </button>
-                  )}
-                  <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+      <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
+        {selectedChat ? (
+          <>
+            {/* Chat Header */}
+            <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
+              <div className="flex items-center space-x-3">
+                {isMobile && (
+                  <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  </button>
+                )}
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                       {selectedChatUser?.photoURL ? (
-                        <img
-                          src={selectedChatUser.photoURL}
+                      <img
+                        src={selectedChatUser.photoURL}
                           alt={selectedChatUser.displayName || 'User'}
                           className="w-full h-full rounded-full object-cover"
                         />
@@ -659,6 +741,20 @@ const ChatPage = () => {
                       {getTypingText() || (selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat')}
                     </p>
                   </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handleStartCall('audio')}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <PhoneIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </button>
+                  <button
+                    onClick={() => handleStartCall('video')}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <VideoCameraIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </button>
                 </div>
               </div>
 
@@ -753,7 +849,7 @@ const ChatPage = () => {
                             <span className="text-xl">{emoji}</span>
                             <span className="text-sm text-gray-500 dark:text-gray-400">
                               {userIds.length} {userIds.length === 1 ? 'reaction' : 'reactions'}
-                            </span>
+                    </span>
                           </div>
                           <button
                             onClick={() => handleReaction(selectedReactions.messageId, emoji)}
@@ -819,28 +915,28 @@ const ChatPage = () => {
                       <MicrophoneIcon className="w-6 h-6" />
                     )}
                   </button>
-                  <input
-                    type="text"
-                    value={newMessage}
+                <input
+                  type="text"
+                  value={newMessage}
                     onChange={handleMessageChange}
-                    placeholder="Type a message..."
+                  placeholder="Type a message..."
                     className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newMessage.trim()}
+                />
+                <button
+                  type="submit"
+                  disabled={!newMessage.trim()}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
+                >
                     Send
-                  </button>
-                </div>
-              </form>
-            </>
-          ) : (
+                </button>
+              </div>
+            </form>
+          </>
+        ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
               Select a chat to start messaging
-            </div>
-          )}
+          </div>
+        )}
         </div>
       </div>
 
@@ -854,6 +950,26 @@ const ChatPage = () => {
           <span className="text-gray-600 dark:text-gray-400">Settings</span>
         </button>
       </div>
+
+      {/* Add CallInterface */}
+      {isInCall && selectedChat && (
+        <CallInterface
+          chatId={selectedChat}
+          currentUser={user}
+          otherUser={selectedChatUser}
+          onEndCall={handleEndCall}
+          callType={callType!}
+        />
+      )}
+
+      {incomingCall && (
+        <CallNotification
+          caller={incomingCall.caller}
+          callType={incomingCall.type}
+          onAccept={handleAcceptCall}
+          onReject={handleRejectCall}
+        />
+      )}
     </div>
   );
 };
