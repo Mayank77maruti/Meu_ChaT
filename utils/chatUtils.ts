@@ -21,6 +21,9 @@ export interface Message {
   senderId: string;
   timestamp: Date;
   read: boolean;
+  reactions?: {
+    [emoji: string]: string[]; // emoji -> array of user IDs who reacted
+  };
 }
 
 export interface Chat {
@@ -28,6 +31,10 @@ export interface Chat {
   participants: string[];
   lastMessage?: string;
   lastMessageTime?: Date;
+  isGroup?: boolean;
+  name?: string;
+  createdBy?: string;
+  createdAt?: Date;
 }
 
 // Create a new chat...................................
@@ -62,6 +69,10 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
         participants: data.participants,
         lastMessage: data.lastMessage,
         lastMessageTime: data.lastMessageTime?.toDate(),
+        isGroup: data.isGroup || false,
+        name: data.name,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate(),
       });
     });
     // Sort chats client-side
@@ -136,4 +147,30 @@ export const markMessageAsRead = async (messageId: string) => {
 export const getUserProfile = async (userId: string) => {
   const userDoc = await getDoc(doc(db, 'users', userId));
   return userDoc.data();
+};
+
+export const addReaction = async (chatId: string, messageId: string, emoji: string, userId: string) => {
+  const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+  const messageDoc = await getDoc(messageRef);
+  
+  if (!messageDoc.exists()) return;
+
+  const message = messageDoc.data() as Message;
+  const reactions = message.reactions || {};
+  const userReactions = reactions[emoji] || [];
+
+  // If user already reacted with this emoji, remove their reaction
+  if (userReactions.includes(userId)) {
+    const updatedReactions = userReactions.filter(id => id !== userId);
+    if (updatedReactions.length === 0) {
+      delete reactions[emoji];
+    } else {
+      reactions[emoji] = updatedReactions;
+    }
+  } else {
+    // Add user's reaction
+    reactions[emoji] = [...userReactions, userId];
+  }
+
+  await updateDoc(messageRef, { reactions });
 }; 
