@@ -56,16 +56,20 @@ const Navbar = ({ onGoogleSignIn }: NavbarProps) => {
               <div className="flex items-center space-x-4">
                 {/* User Profile */}
                 <div className="flex items-center space-x-3 bg-white/5 backdrop-blur-sm rounded-2xl px-4 py-2 border border-white/10 hover:border-white/20 transition-all duration-300">
-                  {user.photoURL && (
-                    <div className="relative">
+                  <div className="relative">
+                    {user.photoURL ? (
                       <img
                         src={user.photoURL}
                         alt="Profile"
                         className="w-8 h-8 rounded-full border-2 border-violet-400/60 shadow-lg"
                       />
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-gray-900"></div>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="w-8 h-8 rounded-full border-2 border-violet-400/60 shadow-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-sm text-gray-500 dark:text-gray-400">
+                        {user?.displayName?.[0]?.toUpperCase() || '?'}
+                      </div>
+                    )}
+                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-gray-900"></div>
+                  </div>
                   <div className="flex flex-col">
                     <span className="text-sm text-white font-semibold leading-tight">
                       {user.displayName?.split(' ')[0] || 'User'}
@@ -137,13 +141,19 @@ const Navbar = ({ onGoogleSignIn }: NavbarProps) => {
             {user ? (
               <>
                 <div className="flex items-center space-x-3 p-3 bg-white/5 rounded-xl">
-                  {user.photoURL && (
-                    <img
-                      src={user.photoURL}
-                      alt="Profile"
-                      className="w-10 h-10 rounded-full border-2 border-violet-400/60"
-                    />
-                  )}
+                  <div className="relative">
+                    {user.photoURL ? (
+                      <img
+                        src={user.photoURL}
+                        alt="Profile"
+                        className="w-10 h-10 rounded-full border-2 border-violet-400/60"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full border-2 border-violet-400/60 bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                        {user?.displayName?.[0]?.toUpperCase() || '?'}
+                      </div>
+                    )}
+                  </div>
                   <div>
                     <div className="text-white font-semibold">
                       {user.displayName?.split(' ')[0] || 'User'}

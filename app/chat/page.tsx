@@ -286,23 +286,27 @@ const ChatPage = () => {
                           <img
                             src={otherParticipant.photoURL}
                             alt={otherParticipant.displayName || 'User'}
-                            className="w-10 h-10 rounded-full"
+                            className="w-full h-full rounded-full object-cover"
                           />
-                        ) : null}
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                            {otherParticipant?.displayName?.[0]?.toUpperCase() || '?'}
+                          </div>
+                        )}
                       </div>
-                      {!isGroupChat && isOnline && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+                      {!isGroupChat && (
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                          isOnline ? 'bg-green-500' : 'bg-gray-400'
+                        }`} />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
                       </p>
-                      {!isGroupChat && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                          {isOnline ? 'Online' : 'Offline'}
-                        </p>
-                      )}
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                        {chat.lastMessage || 'No messages yet'}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -316,18 +320,27 @@ const ChatPage = () => {
           {selectedChat ? (
             <>
               {/* Chat Header */}
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
                 <div className="flex items-center space-x-3">
+                  {isMobile && (
+                    <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                      <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                    </button>
+                  )}
                   <div className="relative">
                     <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                       {selectedChatUser?.photoURL ? (
                         <img
                           src={selectedChatUser.photoURL}
                           alt={selectedChatUser.displayName || 'User'}
-                          className="w-10 h-10 rounded-full"
+                          className="w-full h-full rounded-full object-cover"
                         />
                       ) : (
-                        <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
+                        <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                          {selectedChatUser?.displayName?.[0]?.toUpperCase() || '?'}
+                        </div>
                       )}
                     </div>
                     {selectedChatUser?.online && (
@@ -480,6 +493,17 @@ const ChatPage = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Settings Button */}
+      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          className="w-full flex items-center justify-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+        >
+          <Cog6ToothIcon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+          <span className="text-gray-600 dark:text-gray-400">Settings</span>
+        </button>
       </div>
     </div>
   );
