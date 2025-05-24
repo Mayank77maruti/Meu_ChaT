@@ -1,6 +1,6 @@
 "use client";
 import { Suspense } from "react";
-import { auth } from '../../firebase';
+import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
@@ -14,6 +14,8 @@ import Sidebar from '../../components/Sidebar';
 import EmojiPicker from '../../components/EmojiPicker';
 import { Theme } from 'emoji-picker-react';
 import { CldUploadWidget } from 'next-cloudinary';
+import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -38,6 +40,10 @@ const ChatPage = () => {
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentChatRef = useRef<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<{[key: string]: boolean}>({});
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const rtdb = getDatabase();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -179,6 +185,33 @@ const ChatPage = () => {
   useEffect(() => {
     currentChatRef.current = selectedChat;
   }, [selectedChat]);
+
+  useEffect(() => {
+    // Listen to typing status
+    if (!selectedChat || !user) return;
+
+    const typingRef = ref(rtdb, `typing/${selectedChat}`);
+    const unsubscribe = onValue(typingRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const typingStatus: {[key: string]: boolean} = {};
+      
+      Object.entries(data).forEach(([userId, isTyping]) => {
+        if (userId !== user.uid) {
+          typingStatus[userId] = isTyping as boolean;
+        }
+      });
+      
+      setTypingUsers(typingStatus);
+    });
+
+    return () => {
+      unsubscribe();
+      // Clear typing status when leaving chat
+      if (user) {
+        set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), false);
+      }
+    };
+  }, [selectedChat, user]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -448,6 +481,52 @@ const ChatPage = () => {
     }
   };
 
+  // Handle typing status
+  const handleTyping = () => {
+    if (!selectedChat || !user) return;
+
+    // Set typing status to true
+    set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), true);
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set timeout to clear typing status
+    typingTimeoutRef.current = setTimeout(() => {
+      set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), false);
+    }, 3000);
+  };
+
+  // Update message input to trigger typing status
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    handleTyping();
+  };
+
+  // Get typing users display text
+  const getTypingText = () => {
+    const typingUserIds = Object.entries(typingUsers)
+      .filter(([_, isTyping]) => isTyping)
+      .map(([userId]) => userId);
+
+    if (typingUserIds.length === 0) return null;
+
+    const typingNames = typingUserIds.map(userId => {
+      const user = chatParticipants[userId];
+      return user?.displayName || 'Someone';
+    });
+
+    if (typingNames.length === 1) {
+      return `${typingNames[0]} is typing...`;
+    } else if (typingNames.length === 2) {
+      return `${typingNames[0]} and ${typingNames[1]} are typing...`;
+    } else {
+      return 'Several people are typing...';
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
@@ -577,7 +656,7 @@ const ChatPage = () => {
                       {selectedChatUser ? selectedChatUser.displayName : chats.find(c => c.id === selectedChat)?.name || 'Chat'}
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat'}
+                      {getTypingText() || (selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat')}
                     </p>
                   </div>
                 </div>
@@ -743,7 +822,7 @@ const ChatPage = () => {
                   <input
                     type="text"
                     value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
+                    onChange={handleMessageChange}
                     placeholder="Type a message..."
                     className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
