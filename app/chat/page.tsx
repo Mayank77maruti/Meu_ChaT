@@ -1,4 +1,5 @@
 "use client";
+import { Suspense } from "react";
 import { auth } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -348,7 +349,6 @@ const ChatPage = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
             <form onSubmit={handleSendMessage} className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
               <div className="flex items-center space-x-2">
                 <input
@@ -383,4 +383,14 @@ const ChatPage = () => {
   );
 };
 
-export default ChatPage;
+export default function ChatPageWrapper() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    }>
+      <ChatPage />
+    </Suspense>
+  );
+}
