@@ -1,6 +1,7 @@
 import { auth, db } from '../firebase';
 import { doc, setDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged, updateProfile } from 'firebase/auth';
+import { getDatabase, ref, onDisconnect, serverTimestamp, onValue, set, remove } from 'firebase/database';
 
 export interface UserProfile {
   uid: string;
@@ -62,9 +63,18 @@ export const setUserOnlineStatus = async (online: boolean) => {
   if (!user) return;
 
   const userRef = doc(db, 'users', user.uid);
+  const dbRef = ref(getDatabase(), `status/${user.uid}`);
+
+  // Update Firestore
   await updateDoc(userRef, {
     online,
     lastSeen: new Date(),
+  });
+
+  // Update Realtime Database
+  await set(dbRef, {
+    online,
+    lastSeen: serverTimestamp(),
   });
 };
 
@@ -81,15 +91,44 @@ export const listenToUserStatus = (userId: string, callback: (profile: UserProfi
 export const initializePresence = () => {
   onAuthStateChanged(auth, async (user) => {
     if (user) {
+      const userRef = doc(db, 'users', user.uid);
+      const dbRef = ref(getDatabase(), `status/${user.uid}`);
+      
       // Set user as online
       await setUserOnlineStatus(true);
 
       // Set up offline status when user disconnects
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
+      await onDisconnect(dbRef).set({
         online: false,
-        lastSeen: new Date(),
+        lastSeen: serverTimestamp(),
+      });
+
+      // Handle window/tab close
+      window.addEventListener('beforeunload', async () => {
+        await setUserOnlineStatus(false);
       });
     }
   });
+};
+
+// Cleanup user presence
+export const cleanupPresence = async () => {
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const userRef = doc(db, 'users', user.uid);
+    const dbRef = ref(getDatabase(), `status/${user.uid}`);
+
+    // Update Firestore
+    await updateDoc(userRef, {
+      online: false,
+      lastSeen: new Date(),
+    });
+
+    // Remove from Realtime Database
+    await remove(dbRef);
+  } catch (error) {
+    console.error('Error cleaning up presence:', error);
+  }
 }; 

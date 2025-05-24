@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
-import { UserProfile, updateUserProfile } from '../utils/userUtils';
+import { UserProfile, updateUserProfile, cleanupPresence } from '../utils/userUtils';
 import { useAuthState } from 'react-firebase-hooks/auth';
 
 export default function Settings({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -23,10 +23,28 @@ export default function Settings({ isOpen, onClose }: { isOpen: boolean; onClose
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
-      router.push('/');
+      setIsLoading(true);
+      
+      // Start the cleanup process but don't wait for it
+      cleanupPresence().catch(console.error);
+      
+      // Force sign out and redirect after a short delay
+      setTimeout(async () => {
+        try {
+          await signOut(auth);
+          router.push('/');
+        } catch (error) {
+          console.error('Error during forced sign out:', error);
+          router.push('/');
+        }
+      }, 1000); // 1 second delay
+      
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('Error during logout:', error);
+      // Force sign out and redirect on error
+      signOut(auth).finally(() => router.push('/'));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -148,9 +166,10 @@ export default function Settings({ isOpen, onClose }: { isOpen: boolean; onClose
           {/* Logout Button */}
           <button
             onClick={handleLogout}
-            className="w-full px-4 py-2 rounded-md bg-red-500 text-white hover:bg-red-600"
+            disabled={isLoading}
+            className="w-full px-4 py-2 rounded-md bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Logout
+            {isLoading ? 'Logging out...' : 'Logout'}
           </button>
         </div>
       </div>
