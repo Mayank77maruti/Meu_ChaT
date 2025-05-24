@@ -90,14 +90,13 @@ export const sendMessage = async (chatId: string, text: string) => {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
 
-  const messageRef = await addDoc(collection(db, 'messages'), {
-    chatId,
+  const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), {
     text,
     senderId: currentUser.uid,
     timestamp: serverTimestamp(),
     read: false,
+    reactions: {}
   });
-
 
   await updateDoc(doc(db, 'chats', chatId), {
     lastMessage: text,
@@ -109,10 +108,10 @@ export const sendMessage = async (chatId: string, text: string) => {
 
 
 export const getMessages = (chatId: string, callback: (messages: Message[]) => void) => {
-  const messagesRef = collection(db, 'messages');
+  const messagesRef = collection(db, 'chats', chatId, 'messages');
   const q = query(
     messagesRef,
-    where('chatId', '==', chatId)
+    orderBy('timestamp', 'asc')
   );
 
   return onSnapshot(q, (snapshot) => {
@@ -125,12 +124,8 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         senderId: data.senderId,
         timestamp: data.timestamp?.toDate(),
         read: data.read,
+        reactions: data.reactions || {}
       });
-    });
-    // Sort messages by timestamp on the client side
-    messages.sort((a, b) => {
-      if (!a.timestamp || !b.timestamp) return 0;
-      return a.timestamp.getTime() - b.timestamp.getTime();
     });
     callback(messages);
   });
@@ -155,13 +150,13 @@ export const addReaction = async (chatId: string, messageId: string, emoji: stri
   
   if (!messageDoc.exists()) return;
 
-  const message = messageDoc.data() as Message;
+  const message = messageDoc.data();
   const reactions = message.reactions || {};
   const userReactions = reactions[emoji] || [];
 
   // If user already reacted with this emoji, remove their reaction
   if (userReactions.includes(userId)) {
-    const updatedReactions = userReactions.filter(id => id !== userId);
+    const updatedReactions = userReactions.filter((id: string) => id !== userId);
     if (updatedReactions.length === 0) {
       delete reactions[emoji];
     } else {
