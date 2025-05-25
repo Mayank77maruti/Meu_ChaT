@@ -562,26 +562,59 @@ const ChatPage = () => {
                 type: callData.callType || 'video',
                 chatId,
               });
+              // Set the call status in realtime database
+              set(ref(rtdb, `calls/${chatId}/status`), 'ringing');
             }
           });
+        } else if (callData.type === 'end-call') {
+          // Clear incoming call if it's for this chat
+          if (incomingCall && incomingCall.chatId === chatId) {
+            setIncomingCall(null);
+          }
+          // Remove the call data
+          remove(ref(rtdb, `calls/${chatId}`));
         }
       });
     });
 
     return () => {
       // Cleanup
-      set(ref(rtdb, 'calls'), null);
+      if (incomingCall) {
+        remove(ref(rtdb, `calls/${incomingCall.chatId}`));
+      }
     };
-  }, [user]);
+  }, [user, incomingCall]);
 
   const handleStartCall = (type: 'audio' | 'video') => {
     if (!selectedChat || !user || !selectedChatUser) return;
+    
+    // Set call data in realtime database
+    set(ref(rtdb, `calls/${selectedChat}`), {
+      type: 'offer',
+      from: user.uid,
+      to: selectedChatUser.uid,
+      callType: type,
+      status: 'ringing',
+      timestamp: Date.now()
+    });
+
     setCallType(type);
     setIsInCall(true);
   };
 
   const handleAcceptCall = () => {
     if (!incomingCall) return;
+    
+    // Update call status in realtime database
+    set(ref(rtdb, `calls/${incomingCall.chatId}`), {
+      type: 'accepted',
+      from: incomingCall.caller.uid,
+      to: user?.uid,
+      callType: incomingCall.type,
+      status: 'connected',
+      timestamp: Date.now()
+    });
+
     setSelectedChat(incomingCall.chatId);
     setCallType(incomingCall.type);
     setIsInCall(true);
@@ -590,21 +623,33 @@ const ChatPage = () => {
 
   const handleRejectCall = () => {
     if (!incomingCall) return;
+    
+    // Update call status in realtime database
     set(ref(rtdb, `calls/${incomingCall.chatId}`), {
       type: 'end-call',
-      from: user?.uid,
-      to: incomingCall.caller.uid,
+      from: incomingCall.caller.uid,
+      to: user?.uid,
+      callType: incomingCall.type,
+      status: 'rejected',
+      timestamp: Date.now()
     });
+
     setIncomingCall(null);
   };
 
   const handleEndCall = () => {
     if (!selectedChat) return;
+    
+    // Update call status in realtime database
     set(ref(rtdb, `calls/${selectedChat}`), {
       type: 'end-call',
       from: user?.uid,
       to: selectedChatUser?.uid,
+      callType: callType,
+      status: 'ended',
+      timestamp: Date.now()
     });
+
     setIsInCall(false);
     setCallType(null);
   };
@@ -691,7 +736,18 @@ const ChatPage = () => {
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
                     </p>
                     <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                      {chat.lastMessage || 'No messages yet'}
+                      {incomingCall && incomingCall.chatId === chat.id ? (
+                        <span className="flex items-center text-blue-500 font-medium animate-pulse">
+                          {incomingCall.type === 'video' ? (
+                            <VideoCameraIcon className="w-4 h-4 mr-1" />
+                          ) : (
+                            <PhoneIcon className="w-4 h-4 mr-1" />
+                          )}
+                          Incoming {incomingCall.type} call...
+                        </span>
+                      ) : (
+                        chat.lastMessage || 'No messages yet'
+                      )}
                     </p>
                   </div>
                 </div>
