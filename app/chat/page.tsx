@@ -5,7 +5,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon } from '@heroicons/react/24/outline';
-import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
+import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction, pinMessage, unpinMessage } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
 import { listenToUserStatus } from '../../utils/userUtils';
@@ -32,7 +32,7 @@ const ChatPage = () => {
   const [chatParticipants, setChatParticipants] = useState<{[key: string]: any}>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
+  const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
   const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
   const [selectedReactions, setSelectedReactions] = useState<{messageId: string, reactions: {[emoji: string]: string[]}} | null>(null);
@@ -56,6 +56,26 @@ const ChatPage = () => {
     chatId: string;
   } | null>(null);
   const [messageToScroll, setMessageToScroll] = useState<string | null>(null);
+  const [messageId, setMessageId] = useState<string | null>(null);
+  const [isPinnedMessageDropdownOpen, setIsPinnedMessageDropdownOpen] = useState(false);
+
+  // Close pinned message dropdown when clicking outside
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          // Check if the click was outside the dropdown and its trigger
+          // This requires adding refs to the dropdown and trigger if needed for precise detection
+          // For simplicity, we'll close on any click outside for now.
+          setIsPinnedMessageDropdownOpen(false);
+      };
+
+      if (isPinnedMessageDropdownOpen) {
+          document.addEventListener('click', handleClickOutside);
+      }
+
+      return () => {
+          document.removeEventListener('click', handleClickOutside);
+      };
+  }, [isPinnedMessageDropdownOpen]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -305,117 +325,252 @@ const ChatPage = () => {
     }
   }, []);
 
-  const renderMessageContent = (message: Message) => {
-    if (message.attachment) {
-      const attachment = message.attachment;
-      switch (attachment.type) {
+  const handlePinMessage = async (messageId: string) => {
+    try {
+      console.log('Pinning message:', messageId);
+      await pinMessage(selectedChat!, messageId);
+      // Update the message in local state
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, pinned: true }
+            : { ...msg, pinned: false }
+        )
+      );
+    } catch (error) {
+      console.error('Error pinning message:', error);
+    }
+  };
+
+  const handleUnpinMessage = async () => {
+    try {
+      console.log('Unpinning message');
+      await unpinMessage(selectedChat!);
+      // Update the message in local state
+      setMessages(prevMessages => 
+        prevMessages.map(msg => ({ ...msg, pinned: false }))
+      );
+    } catch (error) {
+      console.error('Error unpinning message:', error);
+    }
+  };
+
+  const renderPinnedMessage = () => {
+    if (!selectedChat || !messages.length) return null;
+
+    const pinnedMessage = messages.find(m => m.pinned);
+    console.log('Pinned message:', pinnedMessage);
+    if (!pinnedMessage) return null;
+
+    const handlePinnedMessageClick = () => {
+      const messageElement = messageRefs.current[pinnedMessage.id];
+      if (messageElement) {
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        messageElement.classList.add('bg-blue-50', 'dark:bg-blue-900');
+        setTimeout(() => {
+          messageElement.classList.remove('bg-blue-50', 'dark:bg-blue-900');
+        }, 2000);
+      }
+    };
+
+    const handlePinnedMessageDropdownToggle = (event: React.MouseEvent) => {
+        event.stopPropagation(); // Prevent triggering the main click handler
+        setIsPinnedMessageDropdownOpen(prev => !prev);
+    };
+
+    const handleUnpinClick = (event: React.MouseEvent) => {
+        event.stopPropagation(); // Prevent triggering the main click handler
+        handleUnpinMessage();
+        setIsPinnedMessageDropdownOpen(false); // Close dropdown after unpinning
+    };
+
+    const renderMediaIcon = () => {
+      if (!pinnedMessage.attachment) return null;
+
+      switch (pinnedMessage.attachment.type) {
         case 'image':
           return (
-            <div className="mt-2">
-              <img
-                src={attachment.url}
-                alt="Shared image"
-                className="max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                onClick={() => window.open(attachment.url, '_blank')}
-              />
-            </div>
-          );
-        case 'file':
-          return (
-            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
-              <PaperClipIcon className="w-5 h-5 text-gray-500" />
-              <a
-                href={attachment.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-500 hover:underline"
-              >
-                {attachment.name || 'Download file'}
-              </a>
-              {attachment.size && (
-                <span className="text-sm text-gray-500">
-                  ({(attachment.size / 1024).toFixed(1)} KB)
-                </span>
-              )}
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs text-gray-400">Image</span>
             </div>
           );
         case 'video':
           return (
-            <div className="mt-2">
-              <video
-                controls
-                className="max-w-sm rounded-lg"
-                src={attachment.url}
-              >
-                Your browser does not support the video tag.
-              </video>
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs text-gray-400">Video</span>
+            </div>
+          );
+        case 'file':
+          return (
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs text-gray-400">File</span>
             </div>
           );
         case 'voice':
           return (
-            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
-              <button
-                onClick={() => handlePlayAudio(attachment.url)}
-                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
-              >
-                {playingAudio === attachment.url ? (
-                  <PauseIcon className="w-5 h-5 text-gray-500" />
-                ) : (
-                  <PlayIcon className="w-5 h-5 text-gray-500" />
-                )}
-              </button>
-              <div className="flex-1">
-                <div className="h-1 bg-gray-300 dark:bg-gray-600 rounded-full">
-                  <div
-                    className="h-full bg-blue-500 rounded-full"
-                    style={{
-                      width: audioRef.current
-                        ? `${(audioRef.current.currentTime / audioRef.current.duration) * 100}%`
-                        : '0%',
-                    }}
-                  />
-                </div>
-                {attachment.duration && (
-                  <span className="text-sm text-gray-500">
-                    {attachment.duration}s
-                  </span>
-                )}
-              </div>
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              <span className="text-xs text-gray-400">Voice</span>
             </div>
           );
         default:
           return null;
       }
-    }
+    };
 
-    // Check for URLs in the message text
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urls = message.text.match(urlRegex);
-    
-    if (urls) {
-      return (
-        <div>
-          <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-          {urls.map((url, index) => (
-            <div key={index} className="mt-2 max-w-sm rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                <div className="p-3">
-                  <p className="text-sm font-medium text-blue-500 truncate">{url}</p>
-                  <p className="text-xs text-gray-500 mt-1">Click to open link</p>
-                </div>
-              </a>
+    return (
+      <div className="bg-gray-800 border-b border-gray-700 text-white relative z-10">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <button
+            onClick={handlePinnedMessageClick}
+            className="flex items-center space-x-2 flex-1 min-w-0 text-left"
+          >
+            <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-gray-300 truncate">
+                 {chats.find(c => c.id === selectedChat)?.isGroup ? chats.find(c => c.id === selectedChat)?.name : selectedChatUser?.displayName || 'Unknown User'}
+              </p>
+              <div className="text-xs text-gray-400 truncate">
+                {pinnedMessage.text || renderMediaIcon()}
+              </div>
             </div>
-          ))}
-        </div>
-      );
-    }
+          </button>
 
-    return <p className="text-sm whitespace-pre-wrap">{message.text}</p>;
+          <div className="relative">
+            {/* Dropdown Trigger */}
+            <button
+              className="p-1 rounded-full hover:bg-gray-700 text-gray-400"
+              onClick={handlePinnedMessageDropdownToggle}
+              aria-expanded={isPinnedMessageDropdownOpen}
+              aria-haspopup="true"
+            >
+              <svg className={`w-4 h-4 transition-transform duration-200 ${isPinnedMessageDropdownOpen ? 'rotate-180' : 'rotate-0'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Dropdown Menu */}
+            {isPinnedMessageDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-40 origin-top-right bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="options-menu">
+                <div className="py-1" role="none">
+                  <button
+                    onClick={handleUnpinClick}
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700" role="menuitem"
+                  >
+                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                     </svg>
+                    Unpin
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMessageContent = (message: Message) => {
+    const isCurrentUser = message.senderId === user?.uid;
+    const messageRef = (el: HTMLDivElement | null) => {
+      if (el && message.id === messageId) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+          el.classList.add('highlight-message');
+          setTimeout(() => el.classList.remove('highlight-message'), 2000);
+        }, 100);
+      }
+      messageRefs.current[message.id] = el;
+    };
+
+    return (
+      <div
+        ref={messageRef}
+        key={message.id}
+        className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-1.5 group`}
+      >
+        <div className={`flex flex-col max-w-[60%] ${isCurrentUser ? 'items-end' : 'items-start'}`}>
+          <div className="flex items-center space-x-1.5 mb-0.5">
+            {!isCurrentUser && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {message.senderId === user?.uid ? 'You' : 'Other User'}
+              </span>
+            )}
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              {new Date(message.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+          <div className={`rounded-lg p-1.5 text-sm ${
+            isCurrentUser 
+              ? 'bg-blue-500 text-white' 
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
+          }`}>
+            {message.text}
+            {message.attachment && (
+              <div className="mt-1">
+                {message.attachment.type === 'image' && (
+                  <img 
+                    src={message.attachment.url} 
+                    alt={message.attachment.name || 'Image'} 
+                    className="max-w-[250px] rounded-lg"
+                  />
+                )}
+                {message.attachment.type === 'video' && (
+                  <video 
+                    src={message.attachment.url} 
+                    controls
+                    className="max-w-[250px] rounded-lg"
+                  />
+                )}
+                {message.attachment.type === 'file' && (
+                  <div className="flex items-center space-x-1 text-xs">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    <span>{message.attachment.name || 'File'}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center space-x-1 mt-0.5">
+            {!message.pinned && (
+              <button
+                onClick={() => handlePinMessage(message.id)}
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 invisible group-hover:visible"
+                title="Pin message"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+              </button>
+            )}
+            {message.pinned && (
+              <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center">
+                <svg className="w-3 h-3 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+                Pinned
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -856,69 +1011,12 @@ const ChatPage = () => {
                 </div>
               </div>
 
+              {/* Pinned Message */}
+              {renderPinnedMessage()}
+
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-                {messages.map((message) => {
-                  const isGroupChat = chats.find(c => c.id === selectedChat)?.isGroup;
-                  const sender = chatParticipants[message.senderId];
-                  const reactions = message.reactions || {};
-                  const reactionCount = Object.values(reactions).reduce((acc, users) => acc + users.length, 0);
-                  const lastEmoji = Object.keys(reactions).pop();
-                  const isOwnMessage = message.senderId === user?.uid;
-                  
-                  return (
-                    <div
-                      key={message.id}
-                      ref={setMessageRef(message.id)}
-                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} mb-4`}
-                    >
-                      <div className="flex flex-col max-w-[85%] group">
-                        {isGroupChat && !isOwnMessage && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                            {sender?.displayName || 'Unknown User'}
-                          </p>
-                        )}
-                        <div className="relative">
-                          <div
-                            className={`rounded-lg px-4 py-2 break-words ${
-                              isOwnMessage
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-                            }`}
-                          >
-                            {renderMessageContent(message)}
-                            <p className="text-xs mt-1 opacity-70">
-                              {formatTimestamp(message.timestamp)}
-                            </p>
-                          </div>
-                          
-                          {/* Reaction Button */}
-                          {!isOwnMessage && (
-                            <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                              <EmojiPicker
-                                onSelect={(emoji) => handleReaction(message.id, emoji)}
-                                theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
-                                position="bottom"
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Compact Reactions Display */}
-                        {reactionCount > 0 && (
-                          <div className="mt-1 flex justify-end">
-                            <button
-                              onClick={() => handleReactionClick(message.id, reactions)}
-                              className="px-2 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200"
-                            >
-                              {lastEmoji} {reactionCount}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {messages.map(renderMessageContent)}
                 <div ref={messagesEndRef} />
                 <audio ref={audioRef} className="hidden" />
               </div>

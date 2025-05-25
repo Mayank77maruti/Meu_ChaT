@@ -15,7 +15,7 @@ interface SearchResult {
   isGroup?: boolean;
   participantInfo?: {
     uid: string;
-    displayName: string;
+    displayName?: string;
     photoURL?: string;
     online?: boolean;
   };

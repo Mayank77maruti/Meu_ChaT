@@ -23,7 +23,6 @@ export interface Message {
   timestamp: number;
   read: boolean;
   pinned?: boolean;
-  pinnedAt?: number;
   reactions?: { [emoji: string]: string[] };
   attachment?: {
     type: 'image' | 'file' | 'voice' | 'video';
@@ -43,6 +42,8 @@ export interface Chat {
   name?: string;
   createdBy?: string;
   createdAt?: Date;
+  pinnedMessage?: string;
+  pinnedAt?: Date;
 }
 
 export interface UserProfile {
@@ -89,6 +90,8 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
         name: data.name,
         createdBy: data.createdBy,
         createdAt: data.createdAt?.toDate(),
+        pinnedMessage: data.pinnedMessage,
+        pinnedAt: data.pinnedAt?.toDate(),
       });
     });
     // Sort chats client-side
@@ -153,6 +156,7 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         senderId: data.senderId,
         timestamp: data.timestamp?.toDate().getTime() || Date.now(),
         read: data.read || false,
+        pinned: data.pinned || false,
         reactions: data.reactions || {},
         attachment: data.attachment
       });
@@ -299,54 +303,60 @@ export const searchGroups = async (searchTerm: string): Promise<Chat[]> => {
         name: data.name,
         createdBy: data.createdBy,
         createdAt: data.createdAt?.toDate(),
+        pinnedMessage: data.pinnedMessage,
+        pinnedAt: data.pinnedAt?.toDate(),
       });
     }
   });
   return groups;
 };
 
-// Pin/Unpin message
-export const togglePinMessage = async (chatId: string, messageId: string) => {
-  const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
-  const messageDoc = await getDoc(messageRef);
+export const pinMessage = async (chatId: string, messageId: string) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('No user logged in');
+
+  // First, unpin any existing pinned message
+  const chatRef = doc(db, 'chats', chatId);
+  const chatDoc = await getDoc(chatRef);
+  const chatData = chatDoc.data();
   
-  if (!messageDoc.exists()) return;
+  if (chatData?.pinnedMessage) {
+    // Unpin the existing message
+    await updateDoc(doc(db, 'chats', chatId, 'messages', chatData.pinnedMessage), {
+      pinned: false
+    });
+  }
 
-  const message = messageDoc.data();
-  const isPinned = message.pinned || false;
+  // Pin the new message
+  await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+    pinned: true
+  });
 
-  await updateDoc(messageRef, {
-    pinned: !isPinned,
-    pinnedAt: !isPinned ? Date.now() : null
+  // Update the chat document with the new pinned message
+  await updateDoc(chatRef, {
+    pinnedMessage: messageId,
+    pinnedAt: serverTimestamp()
   });
 };
 
-// Get pinned messages for a chat
-export const getPinnedMessages = (chatId: string, callback: (messages: Message[]) => void) => {
-  const messagesRef = collection(db, 'chats', chatId, 'messages');
-  const q = query(
-    messagesRef,
-    where('pinned', '==', true),
-    orderBy('pinnedAt', 'desc')
-  );
+export const unpinMessage = async (chatId: string) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('No user logged in');
 
-  return onSnapshot(q, (snapshot) => {
-    const messages: Message[] = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      messages.push({
-        id: doc.id,
-        chatId,
-        text: data.text,
-        senderId: data.senderId,
-        timestamp: data.timestamp?.toDate().getTime() || Date.now(),
-        read: data.read || false,
-        pinned: data.pinned || false,
-        pinnedAt: data.pinnedAt,
-        reactions: data.reactions || {},
-        attachment: data.attachment
-      });
+  const chatRef = doc(db, 'chats', chatId);
+  const chatDoc = await getDoc(chatRef);
+  const chatData = chatDoc.data();
+
+  if (chatData?.pinnedMessage) {
+    // Unpin the message
+    await updateDoc(doc(db, 'chats', chatId, 'messages', chatData.pinnedMessage), {
+      pinned: false
     });
-    callback(messages);
-  });
+
+    // Remove pinned message reference from chat
+    await updateDoc(chatRef, {
+      pinnedMessage: null,
+      pinnedAt: null
+    });
+  }
 }; 
