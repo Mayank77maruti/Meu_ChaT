@@ -324,18 +324,18 @@ export const addReaction = async (chatId: string, messageId: string, emoji: stri
 
   const message = messageDoc.data();
   const reactions = message.reactions || {};
-  const userReactions = reactions[emoji] || [];
 
-  // If user already reacted with this emoji, remove their reaction
-  if (userReactions.includes(userId)) {
-    const updatedReactions = userReactions.filter((id: string) => id !== userId);
-    if (updatedReactions.length === 0) {
-      delete reactions[emoji];
-    } else {
-      reactions[emoji] = updatedReactions;
+  // Remove any existing reaction from this user
+  Object.keys(reactions).forEach(existingEmoji => {
+    reactions[existingEmoji] = reactions[existingEmoji].filter((id: string) => id !== userId);
+    if (reactions[existingEmoji].length === 0) {
+      delete reactions[existingEmoji];
     }
-  } else {
-    // Add user's reaction
+  });
+
+  // Add the new reaction
+  const userReactions = reactions[emoji] || [];
+  if (!userReactions.includes(userId)) {
     reactions[emoji] = [...userReactions, userId];
   }
 
@@ -371,17 +371,19 @@ export const searchMessages = async (searchTerm: string): Promise<{
   for (const chatDoc of chatsSnapshot.docs) {
     const chatData = chatDoc.data();
     const chatId = chatDoc.id;
+    const isGroup = chatData.isGroup || false;
+
+    // Get all messages for this chat
     const messagesQuery = query(
       collection(db, 'chats', chatId, 'messages'),
-      where('text', '>=', searchTerm),
-      where('text', '<=', searchTerm + '\uf8ff')
+      orderBy('timestamp', 'desc')
     );
     
     const messagesSnapshot = await getDocs(messagesQuery);
     
     // If it's not a group chat, get the other participant's info
     let participantInfo: UserProfile | undefined;
-    if (!chatData.isGroup) {
+    if (!isGroup) {
       const otherParticipantId = chatData.participants.find((id: string) => id !== currentUser.uid);
       if (otherParticipantId) {
         const userDoc = await getDoc(doc(db, 'users', otherParticipantId));
@@ -391,25 +393,63 @@ export const searchMessages = async (searchTerm: string): Promise<{
       }
     }
 
-    messagesSnapshot.forEach((doc) => {
+    // Get private key for decryption if needed
+    let privateKeyJwk = null;
+    if (!isGroup) {
+      const privateKey = localStorage.getItem('privateKey');
+      if (privateKey) {
+        try {
+          privateKeyJwk = JSON.parse(privateKey);
+        } catch (error) {
+          console.error('Error parsing private key:', error);
+        }
+      }
+    }
+
+    for (const doc of messagesSnapshot.docs) {
       const data = doc.data();
-      searchResults.push({
-        message: {
-          id: doc.id,
+      let messageText = '';
+
+      if (!isGroup && data.encryptedText) {
+        try {
+          const encryptedText = data.senderId === currentUser.uid 
+            ? data.senderEncryptedText 
+            : data.encryptedText;
+            
+          if (encryptedText && privateKeyJwk) {
+            messageText = await decryptMessage(encryptedText, privateKeyJwk);
+          } else {
+            messageText = '[Encrypted Message]';
+          }
+        } catch (error) {
+          console.error('Error decrypting message:', error);
+          messageText = '[Encrypted Message]';
+        }
+      } else {
+        messageText = data.text || '';
+      }
+
+      // Check if the message text contains the search term (case-insensitive)
+      if (messageText.toLowerCase().includes(searchTerm.toLowerCase())) {
+        searchResults.push({
+          message: {
+            id: doc.id,
+            chatId,
+            text: messageText,
+            senderId: data.senderId,
+            timestamp: data.timestamp?.toDate().getTime() || Date.now(),
+            read: data.read || false,
+            reactions: data.reactions || {},
+            attachment: data.attachment,
+            replyTo: data.replyTo
+          },
           chatId,
-          text: data.text,
-          senderId: data.senderId,
-          timestamp: data.timestamp?.toDate().getTime() || Date.now(),
-          read: data.read || false,
-          reactions: data.reactions || {},
-          attachment: data.attachment
-        },
-        chatId,
-        chatName: chatData.isGroup ? chatData.name : participantInfo?.displayName,
-        isGroup: chatData.isGroup || false,
-        participantInfo
-      });
-    });
+          chatName: isGroup ? chatData.name : participantInfo?.displayName,
+          isGroup,
+          participantInfo
+        });
+      }
+    }
   }
   
   // Sort results by timestamp

@@ -9,6 +9,7 @@ export interface UserProfile {
   photoURL?: string;
   online: boolean;
   lastSeen?: Date;
+  email?: string;
 }
 
 // Search users by display name
@@ -66,10 +67,10 @@ export const setUserOnlineStatus = async (online: boolean) => {
   const dbRef = ref(getDatabase(), `status/${user.uid}`);
 
   // Update Firestore
-  await updateDoc(userRef, {
+  await setDoc(userRef, {
     online,
     lastSeen: new Date(),
-  });
+  }, { merge: true });
 
   // Update Realtime Database
   await set(dbRef, {
@@ -142,10 +143,10 @@ export const cleanupPresence = async () => {
     const dbRef = ref(getDatabase(), `status/${user.uid}`);
 
     // Update Firestore
-    await updateDoc(userRef, {
+    await setDoc(userRef, {
       online: false,
       lastSeen: new Date(),
-    });
+    }, { merge: true });
 
     // Update Realtime Database
     await set(dbRef, {
