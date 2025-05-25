@@ -1,11 +1,11 @@
 import { db, auth } from '../firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  addDoc,
   serverTimestamp,
   getDocs,
   doc,
@@ -13,6 +13,8 @@ import {
   arrayUnion,
   getDoc
 } from 'firebase/firestore';
+import { encryptMessage, decryptMessage } from './crypto';
+import CryptoJS from 'crypto-js';
 
 // Types
 export interface Message {
@@ -20,6 +22,7 @@ export interface Message {
   chatId: string;
   senderId: string;
   text: string;
+  encryptedText?: string;
   timestamp: number;
   read: boolean;
   pinned?: boolean;
@@ -124,13 +127,54 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
 
-  const messageData: any = {
-    text,
+  // Get chat participants
+  const chatDoc = await getDoc(doc(db, 'chats', chatId));
+  if (!chatDoc.exists()) throw new Error('Chat not found');
+
+  const chatData = chatDoc.data();
+  const participants = chatData.participants;
+  const isGroup = chatData.isGroup || false;
+
+  let messageData: any = {
+    text: text, // Store plain text for group chats
     senderId: currentUser.uid,
     timestamp: serverTimestamp(),
     read: false,
     reactions: {},
   };
+
+  // Only encrypt for direct messages (not group chats)
+  if (!isGroup) {
+    const otherParticipantId = participants.find((id: string) => id !== currentUser.uid);
+    
+    // Get other participant's public key
+    const otherUserDoc = await getDoc(doc(db, 'users', otherParticipantId));
+    if (!otherUserDoc.exists()) throw new Error('Recipient not found');
+
+    const recipientPublicKey = otherUserDoc.data().publicKey;
+    if (!recipientPublicKey) throw new Error('Recipient has no public key');
+
+    // Get our public key
+    const ourUserDoc = await getDoc(doc(db, 'users', currentUser.uid));
+    if (!ourUserDoc.exists()) throw new Error('Sender not found');
+
+    const ourPublicKey = ourUserDoc.data().publicKey;
+    if (!ourPublicKey) throw new Error('Sender has no public key');
+
+    // Encrypt the message for both sender and recipient
+    const encryptedForRecipient = await encryptMessage(text, recipientPublicKey);
+    const encryptedForSender = await encryptMessage(text, ourPublicKey);
+
+    messageData = {
+      text: '', // Store empty text for backward compatibility
+      encryptedText: encryptedForRecipient,
+      senderEncryptedText: encryptedForSender,
+      senderId: currentUser.uid,
+      timestamp: serverTimestamp(),
+      read: false,
+      reactions: {},
+    };
+  }
 
   if (attachment) {
     messageData.attachment = attachment;
@@ -158,14 +202,69 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
     orderBy('timestamp', 'asc')
   );
 
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(q, async (snapshot) => {
     const messages: Message[] = [];
-    snapshot.forEach((doc) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    // Get chat data to check if it's a group chat
+    const chatDoc = await getDoc(doc(db, 'chats', chatId));
+    if (!chatDoc.exists()) return;
+
+    const isGroup = chatDoc.data().isGroup || false;
+
+    // Only get private key for direct messages
+    let privateKeyJwk = null;
+    if (!isGroup) {
+      // Get private key from localStorage
+      const privateKey = localStorage.getItem('privateKey');
+      if (!privateKey) {
+        console.error('No private key found');
+        return;
+      }
+
+      // Parse the private key from localStorage string to JWK object
+      try {
+        privateKeyJwk = JSON.parse(privateKey);
+        
+        // Ensure the private key has all required JWK properties
+        if (!privateKeyJwk.kty || !privateKeyJwk.n || !privateKeyJwk.e || !privateKeyJwk.d) {
+          throw new Error('Invalid private key format');
+        }
+      } catch (error) {
+        console.error('Error parsing private key:', error);
+        return;
+      }
+    }
+
+    for (const doc of snapshot.docs) {
       const data = doc.data();
+      let decryptedText = '';
+
+      if (!isGroup && data.encryptedText) {
+        try {
+          // Use the appropriate encrypted text based on whether we're the sender or receiver
+          const encryptedText = data.senderId === currentUser.uid 
+            ? data.senderEncryptedText 
+            : data.encryptedText;
+            
+          if (!encryptedText) {
+            decryptedText = '[Encrypted Message]';
+          } else {
+            decryptedText = await decryptMessage(encryptedText, privateKeyJwk);
+          }
+        } catch (error) {
+          console.error('Error decrypting message:', error);
+          decryptedText = '[Encrypted Message]';
+        }
+      } else {
+        decryptedText = data.text || '';
+      }
+
       messages.push({
         id: doc.id,
         chatId,
-        text: data.text,
+        text: decryptedText,
         senderId: data.senderId,
         timestamp: data.timestamp?.toDate().getTime() || Date.now(),
         read: data.read || false,
@@ -174,7 +273,7 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         attachment: data.attachment,
         replyTo: data.replyTo
       });
-    });
+    }
     callback(messages);
   });
 };
@@ -195,7 +294,7 @@ export const getUserProfile = async (userId: string) => {
 export const addReaction = async (chatId: string, messageId: string, emoji: string, userId: string) => {
   const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
   const messageDoc = await getDoc(messageRef);
-  
+
   if (!messageDoc.exists()) return;
 
   const message = messageDoc.data();
