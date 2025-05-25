@@ -5,7 +5,7 @@ import EmojiPickerReact, { EmojiClickData, Theme } from 'emoji-picker-react';
 
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
-  position?: 'top' | 'bottom';
+  position?: 'top' | 'bottom' | 'left' | 'right';
   theme?: Theme;
 }
 
@@ -29,6 +29,21 @@ export default function EmojiPicker({ onSelect, position = 'bottom', theme = The
     setIsOpen(false);
   };
 
+  const getPositionClasses = () => {
+    switch (position) {
+      case 'top':
+        return 'bottom-full mb-2 left-0';
+      case 'bottom':
+        return 'top-full mt-2 left-0';
+      case 'left':
+        return 'right-full mr-2 top-0';
+      case 'right':
+        return 'left-full ml-2 top-0';
+      default:
+        return 'top-full mt-2 left-0';
+    }
+  };
+
   return (
     <div className="relative" ref={pickerRef}>
       <button
@@ -40,11 +55,7 @@ export default function EmojiPicker({ onSelect, position = 'bottom', theme = The
       </button>
 
       {isOpen && (
-        <div
-          className={`absolute ${
-            position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
-          } left-0 z-50`}
-        >
+        <div className={`absolute ${getPositionClasses()} z-50`}>
           <div className="shadow-lg rounded-lg overflow-hidden">
             <EmojiPickerReact
               onEmojiClick={handleEmojiClick}

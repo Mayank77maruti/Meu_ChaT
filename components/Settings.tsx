@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { auth } from '../firebase';
-import { signOut } from 'firebase/auth';
+import { signOut, updateProfile } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 import { UserProfile, updateUserProfile, cleanupPresence } from '../utils/userUtils';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -105,6 +105,12 @@ export default function Settings({ isOpen, onClose }: { isOpen: boolean; onClose
       }
 
       const data = await response.json();
+      
+      // Update Firebase Auth profile
+      await updateProfile(user, {
+        photoURL: result.info.secure_url
+      });
+
       setSuccess('Profile picture updated successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (error: any) {
