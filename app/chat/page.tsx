@@ -1,10 +1,10 @@
 "use client";
 import { Suspense } from "react";
-import { auth } from '../../firebase';
+import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon } from '@heroicons/react/24/outline';
+import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon } from '@heroicons/react/24/outline';
 import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
@@ -13,6 +13,11 @@ import { UserProfile } from '../../utils/userUtils';
 import Sidebar from '../../components/Sidebar';
 import EmojiPicker from '../../components/EmojiPicker';
 import { Theme } from 'emoji-picker-react';
+import { CldUploadWidget } from 'next-cloudinary';
+import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
+import CallInterface from '../../components/CallInterface';
+import CallNotification from '../../components/CallNotification';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -30,6 +35,25 @@ const ChatPage = () => {
   const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
   const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
   const [selectedReactions, setSelectedReactions] = useState<{messageId: string, reactions: {[emoji: string]: string[]}} | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentChatRef = useRef<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<{[key: string]: boolean}>({});
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const rtdb = getDatabase();
+  const [isInCall, setIsInCall] = useState(false);
+  const [isCallIncoming, setIsCallIncoming] = useState(false);
+  const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{
+    caller: UserProfile;
+    type: 'audio' | 'video';
+    chatId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -114,10 +138,12 @@ const ChatPage = () => {
       chat.participants.forEach(participantId => {
         if (participantId !== user.uid) {
           const unsubscribe = listenToUserStatus(participantId, (profile) => {
+            if (profile) {  // Add null check for profile
             setOnlineUsers(prev => ({
               ...prev,
-              [participantId]: profile.online
+                [participantId]: profile.online || false  // Provide default value
             }));
+            }
           });
           unsubscribers.push(unsubscribe);
         }
@@ -140,20 +166,24 @@ const ChatPage = () => {
       setSelectedChatUser(null);
     } else {
       const otherParticipantId = currentChat.participants.find(id => id !== user.uid);
-      if (!otherParticipantId) return;
+    if (!otherParticipantId) return;
 
-      // Get initial user profile
-      getUserProfile(otherParticipantId).then(profile => {
-        setSelectedChatUser(profile as UserProfile);
-      });
+    // Get initial user profile
+    getUserProfile(otherParticipantId).then(profile => {
+        if (profile) {  // Add null check for profile
+      setSelectedChatUser(profile as UserProfile);
+        }
+    });
 
-      // Listen to user status changes
-      const unsubscribe = listenToUserStatus(otherParticipantId, (profile) => {
-        setSelectedChatUser(profile);
-        setOnlineUsers(prev => ({
-          ...prev,
-          [otherParticipantId]: profile.online
-        }));
+    // Listen to user status changes
+    const unsubscribe = listenToUserStatus(otherParticipantId, (profile) => {
+        if (profile) {  // Add null check for profile
+      setSelectedChatUser(profile);
+      setOnlineUsers(prev => ({
+        ...prev,
+            [otherParticipantId]: profile.online || false  // Provide default value
+          }));
+        }
       });
 
       return () => {
@@ -161,6 +191,37 @@ const ChatPage = () => {
       };
     }
   }, [selectedChat, chats, user]);
+
+  useEffect(() => {
+    currentChatRef.current = selectedChat;
+  }, [selectedChat]);
+
+  useEffect(() => {
+    // Listen to typing status
+    if (!selectedChat || !user) return;
+
+    const typingRef = ref(rtdb, `typing/${selectedChat}`);
+    const unsubscribe = onValue(typingRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const typingStatus: {[key: string]: boolean} = {};
+      
+      Object.entries(data).forEach(([userId, isTyping]) => {
+        if (userId !== user.uid) {
+          typingStatus[userId] = isTyping as boolean;
+        }
+      });
+      
+      setTypingUsers(typingStatus);
+    });
+
+    return () => {
+      unsubscribe();
+      // Clear typing status when leaving chat
+      if (user) {
+        set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), false);
+      }
+    };
+  }, [selectedChat, user]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -181,6 +242,7 @@ const ChatPage = () => {
       setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -201,26 +263,350 @@ const ChatPage = () => {
     setSelectedReactions(null);
   };
 
-  // Add this function to format timestamps
-  const formatTimestamp = (timestamp: Date | undefined) => {
-    if (!timestamp) return '';
-    const now = new Date();
-    const messageDate = new Date(timestamp);
-    
-    // If message is from today, show time only
-    if (messageDate.toDateString() === now.toDateString()) {
-      return messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const renderMessageContent = (message: Message) => {
+    if (message.attachment) {
+      const attachment = message.attachment;
+      switch (attachment.type) {
+        case 'image':
+          return (
+            <div className="mt-2">
+              <img
+                src={attachment.url}
+                alt="Shared image"
+                className="max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => window.open(attachment.url, '_blank')}
+              />
+            </div>
+          );
+        case 'file':
+          return (
+            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <PaperClipIcon className="w-5 h-5 text-gray-500" />
+              <a
+                href={attachment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:underline"
+              >
+                {attachment.name || 'Download file'}
+              </a>
+              {attachment.size && (
+                <span className="text-sm text-gray-500">
+                  ({(attachment.size / 1024).toFixed(1)} KB)
+                </span>
+              )}
+            </div>
+          );
+        case 'video':
+          return (
+            <div className="mt-2">
+              <video
+                controls
+                className="max-w-sm rounded-lg"
+                src={attachment.url}
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+          );
+        case 'voice':
+          return (
+            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <button
+                onClick={() => handlePlayAudio(attachment.url)}
+                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
+              >
+                {playingAudio === attachment.url ? (
+                  <PauseIcon className="w-5 h-5 text-gray-500" />
+                ) : (
+                  <PlayIcon className="w-5 h-5 text-gray-500" />
+                )}
+              </button>
+              <div className="flex-1">
+                <div className="h-1 bg-gray-300 dark:bg-gray-600 rounded-full">
+                  <div
+                    className="h-full bg-blue-500 rounded-full"
+                    style={{
+                      width: audioRef.current
+                        ? `${(audioRef.current.currentTime / audioRef.current.duration) * 100}%`
+                        : '0%',
+                    }}
+                  />
+                </div>
+                {attachment.duration && (
+                  <span className="text-sm text-gray-500">
+                    {attachment.duration}s
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        default:
+          return null;
+      }
     }
+
+    // Check for URLs in the message text
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urls = message.text.match(urlRegex);
     
-    // If message is from this year, show date and time
-    if (messageDate.getFullYear() === now.getFullYear()) {
-      return messageDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
-             messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (urls) {
+      return (
+        <div>
+          <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+          {urls.map((url, index) => (
+            <div key={index} className="mt-2 max-w-sm rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                <div className="p-3">
+                  <p className="text-sm font-medium text-blue-500 truncate">{url}</p>
+                  <p className="text-xs text-gray-500 mt-1">Click to open link</p>
+                </div>
+              </a>
+            </div>
+          ))}
+        </div>
+      );
     }
-    
-    // If message is from a different year, show full date and time
-    return messageDate.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' +
-           messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return <p className="text-sm whitespace-pre-wrap">{message.text}</p>;
+  };
+
+  const formatTimestamp = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const handleUploadSuccess = async (result: any) => {
+    const chatId = currentChatRef.current;
+    if (!chatId) return;
+
+    try {
+      // Send message with file attachment
+      await sendMessage(chatId, '', {
+        type: result.info.format === 'pdf'
+          ? 'file'
+          : result.info.resource_type === 'video'
+            ? 'video'
+            : result.info.resource_type === 'image'
+              ? 'image'
+              : 'file',
+        url: result.info.secure_url,
+        name: result.info.original_filename,
+        size: result.info.bytes,
+      });
+    } catch (error) {
+      console.error('Error sending message with attachment:', error);
+      alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const startRecording = async () => {
+    if (!selectedChat) return;
+    const currentChatId = selectedChat; // Capture the current chat ID
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const audioBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
+        setAudioChunks(chunks);
+
+        try {
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'voice-message.webm');
+          formData.append('upload_preset', 'chat_attachments');
+
+          const response = await fetch(
+            `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/video/upload`,
+            {
+              method: 'POST',
+              body: formData,
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error('Failed to upload voice message');
+          }
+
+          const data = await response.json();
+          
+          if (!data.secure_url) {
+            throw new Error('No URL returned from upload');
+          }
+
+          // Send voice message to the captured chat ID
+          await sendMessage(currentChatId, '', {
+            type: 'voice',
+            url: data.secure_url,
+            duration: Math.round(audioBlob.size / 16000), // Approximate duration in seconds
+          });
+        } catch (error) {
+          console.error('Error uploading voice message:', error);
+          alert(`Failed to upload voice message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      alert(`Failed to start recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+  };
+
+  const handlePlayAudio = (url: string) => {
+    if (playingAudio === url) {
+      audioRef.current?.pause();
+      setPlayingAudio(null);
+    } else {
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play();
+        setPlayingAudio(url);
+      }
+    }
+  };
+
+  // Handle typing status
+  const handleTyping = () => {
+    if (!selectedChat || !user) return;
+
+    // Set typing status to true
+    set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), true);
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set timeout to clear typing status
+    typingTimeoutRef.current = setTimeout(() => {
+      set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), false);
+    }, 3000);
+  };
+
+  // Update message input to trigger typing status
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    handleTyping();
+  };
+
+  // Get typing users display text
+  const getTypingText = () => {
+    const typingUserIds = Object.entries(typingUsers)
+      .filter(([_, isTyping]) => isTyping)
+      .map(([userId]) => userId);
+
+    if (typingUserIds.length === 0) return null;
+
+    const typingNames = typingUserIds.map(userId => {
+      const user = chatParticipants[userId];
+      return user?.displayName || 'Someone';
+    });
+
+    if (typingNames.length === 1) {
+      return `${typingNames[0]} is typing...`;
+    } else if (typingNames.length === 2) {
+      return `${typingNames[0]} and ${typingNames[1]} are typing...`;
+    } else {
+      return 'Several people are typing...';
+    }
+  };
+
+  // Add call listeners
+  useEffect(() => {
+    if (!user) return;
+
+    const callsRef = ref(rtdb, 'calls');
+    onValue(callsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+
+      // Check for incoming calls
+      Object.entries(data).forEach(([chatId, callData]: [string, any]) => {
+        if (callData.type === 'offer' && callData.to === user.uid) {
+          // Get caller's profile
+          getUserProfile(callData.from).then((profile) => {
+            if (profile) {
+              setIncomingCall({
+                caller: {
+                  uid: callData.from,
+                  displayName: profile.displayName || 'Unknown User',
+                  photoURL: profile.photoURL,
+                  online: profile.online || false
+                },
+                type: callData.callType || 'video',
+                chatId,
+              });
+            }
+          });
+        }
+      });
+    });
+
+    return () => {
+      // Cleanup
+      set(ref(rtdb, 'calls'), null);
+    };
+  }, [user]);
+
+  const handleStartCall = (type: 'audio' | 'video') => {
+    if (!selectedChat || !user || !selectedChatUser) return;
+    setCallType(type);
+    setIsInCall(true);
+  };
+
+  const handleAcceptCall = () => {
+    if (!incomingCall) return;
+    setSelectedChat(incomingCall.chatId);
+    setCallType(incomingCall.type);
+    setIsInCall(true);
+    setIncomingCall(null);
+  };
+
+  const handleRejectCall = () => {
+    if (!incomingCall) return;
+    set(ref(rtdb, `calls/${incomingCall.chatId}`), {
+      type: 'end-call',
+      from: user?.uid,
+      to: incomingCall.caller.uid,
+    });
+    setIncomingCall(null);
+  };
+
+  const handleEndCall = () => {
+    if (!selectedChat) return;
+    set(ref(rtdb, `calls/${selectedChat}`), {
+      type: 'end-call',
+      from: user?.uid,
+      to: selectedChatUser?.uid,
+    });
+    setIsInCall(false);
+    setCallType(null);
   };
 
   if (loading) {
@@ -243,94 +629,107 @@ const ChatPage = () => {
       {/* Main Chat Area */}
       <div className="flex-1 flex">
         {/* Chat List */}
-        <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-          ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
-              <button
-                onClick={toggleDarkMode}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-                aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                {isDarkMode ? (
-                  <SunIcon className="h-5 w-5 text-gray-200" />
-                ) : (
-                  <MoonIcon className="h-5 w-5 text-gray-600" />
-                )}
-              </button>
-            </div>
-            <UserSearch />
+      <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
+        ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
+        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
+            <button
+              onClick={toggleDarkMode}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+              aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {isDarkMode ? (
+                <SunIcon className="h-5 w-5 text-gray-200" />
+              ) : (
+                <MoonIcon className="h-5 w-5 text-gray-600" />
+              )}
+            </button>
           </div>
-          <div className="flex-1 overflow-y-auto">
-            {chats.map((chat) => {
+          <UserSearch />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {chats.map((chat) => {
               const isGroupChat = chat.isGroup;
               const otherParticipantId = !isGroupChat ? chat.participants.find(id => id !== user?.uid) : null;
               const otherParticipant = !isGroupChat ? chatParticipants[otherParticipantId || ''] : null;
               const isOnline = !isGroupChat ? onlineUsers[otherParticipantId || ''] : false;
-              
-              return (
-                <div
-                  key={chat.id}
-                  onClick={() => setSelectedChat(chat.id)}
-                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
-                    selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
-                        {isGroupChat ? (
-                          <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
-                        ) : otherParticipant?.photoURL ? (
-                          <img
-                            src={otherParticipant.photoURL}
-                            alt={otherParticipant.displayName || 'User'}
-                            className="w-10 h-10 rounded-full"
-                          />
-                        ) : null}
-                      </div>
-                      {!isGroupChat && isOnline && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                        {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
-                      </p>
-                      {!isGroupChat && (
-                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                          {isOnline ? 'Online' : 'Offline'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Chat Messages */}
-        <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
-          {selectedChat ? (
-            <>
-              {/* Chat Header */}
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            
+            return (
+              <div
+                key={chat.id}
+                onClick={() => setSelectedChat(chat.id)}
+                className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
+                  selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
+                }`}
+              >
                 <div className="flex items-center space-x-3">
                   <div className="relative">
                     <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
-                      {selectedChatUser?.photoURL ? (
+                        {isGroupChat ? (
+                          <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
+                        ) : otherParticipant?.photoURL ? (
                         <img
-                          src={selectedChatUser.photoURL}
-                          alt={selectedChatUser.displayName || 'User'}
-                          className="w-10 h-10 rounded-full"
+                          src={otherParticipant.photoURL}
+                            alt={otherParticipant.displayName || 'User'}
+                            className="w-full h-full rounded-full object-cover"
                         />
-                      ) : (
-                        <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                            {otherParticipant?.displayName?.[0]?.toUpperCase() || '?'}
+                          </div>
                       )}
                     </div>
-                    {selectedChatUser?.online && (
+                      {!isGroupChat && (
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                      isOnline ? 'bg-green-500' : 'bg-gray-400'
+                    }`} />
+                      )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                        {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                      {chat.lastMessage || 'No messages yet'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+        {/* Chat Messages */}
+      <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
+        {selectedChat ? (
+          <>
+            {/* Chat Header */}
+            <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
+              <div className="flex items-center space-x-3">
+                {isMobile && (
+                  <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  </button>
+                )}
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+                      {selectedChatUser?.photoURL ? (
+                      <img
+                        src={selectedChatUser.photoURL}
+                          alt={selectedChatUser.displayName || 'User'}
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                          {selectedChatUser?.displayName?.[0]?.toUpperCase() || '?'}
+                        </div>
+                      )}
+                    </div>
+                    {selectedChatUser && selectedChatUser.online && (
                       <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                     )}
                   </div>
@@ -339,9 +738,23 @@ const ChatPage = () => {
                       {selectedChatUser ? selectedChatUser.displayName : chats.find(c => c.id === selectedChat)?.name || 'Chat'}
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat'}
+                      {getTypingText() || (selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat')}
                     </p>
                   </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handleStartCall('audio')}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <PhoneIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </button>
+                  <button
+                    onClick={() => handleStartCall('video')}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <VideoCameraIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </button>
                 </div>
               </div>
 
@@ -374,19 +787,19 @@ const ChatPage = () => {
                                 : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
                             }`}
                           >
-                            <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                            {renderMessageContent(message)}
                             <p className="text-xs mt-1 opacity-70">
                               {formatTimestamp(message.timestamp)}
                             </p>
                           </div>
                           
-                          {/* Reaction Button - Only show for other users' messages */}
+                          {/* Reaction Button */}
                           {!isOwnMessage && (
                             <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                               <EmojiPicker
                                 onSelect={(emoji) => handleReaction(message.id, emoji)}
-                                position="bottom"
                                 theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
+                                position="bottom"
                               />
                             </div>
                           )}
@@ -408,6 +821,7 @@ const ChatPage = () => {
                   );
                 })}
                 <div ref={messagesEndRef} />
+                <audio ref={audioRef} className="hidden" />
               </div>
 
               {/* Reactions Popup */}
@@ -435,7 +849,7 @@ const ChatPage = () => {
                             <span className="text-xl">{emoji}</span>
                             <span className="text-sm text-gray-500 dark:text-gray-400">
                               {userIds.length} {userIds.length === 1 ? 'reaction' : 'reactions'}
-                            </span>
+                    </span>
                           </div>
                           <button
                             onClick={() => handleReaction(selectedReactions.messageId, emoji)}
@@ -457,30 +871,105 @@ const ChatPage = () => {
               {/* Message Input */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                 <div className="flex space-x-4">
-                  <input
-                    type="text"
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder="Type a message..."
-                    className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newMessage.trim()}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  <CldUploadWidget
+                    uploadPreset="chat_attachments"
+                    onSuccess={handleUploadSuccess}
+                    options={{
+                      resourceType: "auto",
+                      clientAllowedFormats: ["image", "video", "pdf", "audio"],
+                      maxFileSize: 10000000, // 10MB
+                      showPoweredBy: false,
+                      showSkipCropButton: true,
+                      sources: ["local", "camera", "url"],
+                      multiple: false,
+                    }}
                   >
-                    Send
+                    {({ open }) => (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (currentChatRef.current) {
+                            open();
+                          }
+                        }}
+                        className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      >
+                        <PaperClipIcon className="w-6 h-6" />
+                      </button>
+                    )}
+                  </CldUploadWidget>
+                  <button
+                    type="button"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`p-2 ${
+                      isRecording 
+                        ? 'text-red-500 hover:text-red-600' 
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <StopIcon className="w-6 h-6" />
+                    ) : (
+                      <MicrophoneIcon className="w-6 h-6" />
+                    )}
                   </button>
-                </div>
-              </form>
-            </>
-          ) : (
+                <input
+                  type="text"
+                  value={newMessage}
+                    onChange={handleMessageChange}
+                  placeholder="Type a message..."
+                    className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!newMessage.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Send
+                </button>
+              </div>
+            </form>
+          </>
+        ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
               Select a chat to start messaging
-            </div>
-          )}
+          </div>
+        )}
         </div>
       </div>
+
+      {/* Settings Button */}
+      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => setIsSettingsOpen(true)}
+          className="w-full flex items-center justify-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+        >
+          <Cog6ToothIcon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+          <span className="text-gray-600 dark:text-gray-400">Settings</span>
+        </button>
+      </div>
+
+      {/* Add CallInterface */}
+      {isInCall && selectedChat && (
+        <CallInterface
+          chatId={selectedChat}
+          currentUser={user}
+          otherUser={selectedChatUser}
+          onEndCall={handleEndCall}
+          callType={callType!}
+        />
+      )}
+
+      {incomingCall && (
+        <CallNotification
+          caller={incomingCall.caller}
+          callType={incomingCall.type}
+          onAccept={handleAcceptCall}
+          onReject={handleRejectCall}
+        />
+      )}
     </div>
   );
 };

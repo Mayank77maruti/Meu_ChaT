@@ -84,12 +84,16 @@ export default function UserSearch() {
                   className="w-full p-3 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center space-x-3 text-left"
                 >
                   <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
-                    {user.photoURL && (
+                    {user.photoURL ? (
                       <img
                         src={user.photoURL}
                         alt={user.displayName}
                         className="w-full h-full object-cover"
                       />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                        {user.displayName?.[0]?.toUpperCase() || '?'}
+                      </div>
                     )}
                   </div>
                   <div>
