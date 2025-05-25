@@ -552,54 +552,87 @@ const ChatPage = () => {
             </span>
           </div>
           
-          <div className={`rounded-lg p-3 text-sm ${
-            isCurrentUser 
-              ? 'bg-blue-500 text-white' 
-              : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-          } min-w-[80px] min-h-[32px] flex items-center flex-col items-start`}>
-            {/* Display replied-to message preview inside the bubble */}
-            {message.replyTo && (
-              <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
-                <p className={`text-xs font-medium ${isCurrentUser ? 'text-blue-200' : 'text-green-600'} mb-0.5`}>
-                  {message.replyTo.senderId === user?.uid 
-                    ? user.displayName || 'You'
-                    : chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
-                </p>
-                <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
-                  {message.replyTo.text}
-                </p>
+          <div className={`flex ${isCurrentUser ? 'flex-row' : 'flex-row-reverse'} items-start gap-2`}>
+            {/* Emoji Reaction Button - Only show for received messages */}
+            {!isCurrentUser && (
+              <div className="relative invisible group-hover:visible">
+                <EmojiPicker
+                  onSelect={(emoji) => handleReaction(message.id, emoji)}
+                  position="right"
+                  theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
+                />
               </div>
             )}
-            <div className="w-full">
-              {message.text}
-              {message.attachment && (
-                <div className="mt-2">
-                  {message.attachment.type === 'image' && (
-                    <img 
-                      src={message.attachment.url} 
-                      alt={message.attachment.name || 'Image'} 
-                      className="max-w-[250px] rounded-lg"
-                    />
-                  )}
-                  {message.attachment.type === 'video' && (
-                    <video 
-                      src={message.attachment.url} 
-                      controls
-                      className="max-w-[250px] rounded-lg"
-                    />
-                  )}
-                  {message.attachment.type === 'file' && (
-                    <div className="flex items-center space-x-1 text-xs">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                      </svg>
-                      <span>{message.attachment.name || 'File'}</span>
-                    </div>
-                  )}
+
+            <div className={`rounded-lg p-3 text-sm ${
+              isCurrentUser 
+                ? 'bg-blue-500 text-white' 
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
+            } min-w-[80px] min-h-[32px] flex items-center flex-col items-start`}>
+              {/* Display replied-to message preview inside the bubble */}
+              {message.replyTo && (
+                <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
+                  <p className={`text-xs font-medium ${isCurrentUser ? 'text-blue-200' : 'text-green-600'} mb-0.5`}>
+                    {message.replyTo.senderId === user?.uid 
+                      ? user.displayName || 'You'
+                      : chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
+                  </p>
+                  <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
+                    {message.replyTo.text}
+                  </p>
                 </div>
               )}
+              <div className="w-full">
+                {message.text}
+                {message.attachment && (
+                  <div className="mt-2">
+                    {message.attachment.type === 'image' && (
+                      <img 
+                        src={message.attachment.url} 
+                        alt={message.attachment.name || 'Image'} 
+                        className="max-w-[250px] rounded-lg"
+                      />
+                    )}
+                    {message.attachment.type === 'video' && (
+                      <video 
+                        src={message.attachment.url} 
+                        controls
+                        className="max-w-[250px] rounded-lg"
+                      />
+                    )}
+                    {message.attachment.type === 'file' && (
+                      <div className="flex items-center space-x-1 text-xs">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
+                        <span>{message.attachment.name || 'File'}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
+
+          {/* Display Reactions */}
+          {message.reactions && Object.keys(message.reactions).length > 0 && (
+            <div className={`flex items-center space-x-1 mt-1 ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+              {Object.entries(message.reactions).map(([emoji, userIds]) => (
+                <button
+                  key={emoji}
+                  onClick={() => handleReactionClick(message.id, message.reactions!)}
+                  className={`text-xs px-1.5 py-0.5 rounded-full ${
+                    userIds.includes(user?.uid || '')
+                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  {emoji} {userIds.length}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center space-x-1 mt-0.5">
              {/* Reply Button */}
              <button

@@ -299,18 +299,18 @@ export const addReaction = async (chatId: string, messageId: string, emoji: stri
 
   const message = messageDoc.data();
   const reactions = message.reactions || {};
-  const userReactions = reactions[emoji] || [];
 
-  // If user already reacted with this emoji, remove their reaction
-  if (userReactions.includes(userId)) {
-    const updatedReactions = userReactions.filter((id: string) => id !== userId);
-    if (updatedReactions.length === 0) {
-      delete reactions[emoji];
-    } else {
-      reactions[emoji] = updatedReactions;
+  // Remove any existing reaction from this user
+  Object.keys(reactions).forEach(existingEmoji => {
+    reactions[existingEmoji] = reactions[existingEmoji].filter((id: string) => id !== userId);
+    if (reactions[existingEmoji].length === 0) {
+      delete reactions[existingEmoji];
     }
-  } else {
-    // Add user's reaction
+  });
+
+  // Add the new reaction
+  const userReactions = reactions[emoji] || [];
+  if (!userReactions.includes(userId)) {
     reactions[emoji] = [...userReactions, userId];
   }
 
