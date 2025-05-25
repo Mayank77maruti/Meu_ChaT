@@ -137,6 +137,29 @@ const ChatPage = () => {
     };
   }, [user]);
 
+  // Add new effect to load participant info for replied-to messages
+  useEffect(() => {
+    if (!user || !messages.length) return;
+
+    // Get unique sender IDs from replied-to messages
+    const repliedToSenderIds = messages
+      .filter(message => message.replyTo)
+      .map(message => message.replyTo!.senderId)
+      .filter((id, index, self) => id !== user.uid && self.indexOf(id) === index);
+
+    // Load profiles for replied-to message senders
+    repliedToSenderIds.forEach(senderId => {
+      if (!chatParticipants[senderId]) {
+        getUserProfile(senderId).then(profile => {
+          setChatParticipants(prev => ({
+            ...prev,
+            [senderId]: profile
+          }));
+        });
+      }
+    });
+  }, [messages, user, chatParticipants]);
+
   useEffect(() => {
     const chatId = searchParams.get('chatId');
     if (chatId !== selectedChat) {
@@ -538,7 +561,9 @@ const ChatPage = () => {
             {message.replyTo && (
               <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
                 <p className={`text-xs font-medium ${isCurrentUser ? 'text-blue-200' : 'text-green-600'} mb-0.5`}>
-                  {chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
+                  {message.replyTo.senderId === user?.uid 
+                    ? user.displayName || 'You'
+                    : chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
                 </p>
                 <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
                   {message.replyTo.text}
