@@ -15,7 +15,6 @@ import {
 } from 'firebase/firestore';
 import { encryptMessage, decryptMessage } from './crypto';
 import CryptoJS from 'crypto-js';
-import { createMessageNotification, createGroupNotification } from './notificationUtils';
 
 // Types
 export interface Message {
@@ -215,34 +214,6 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
     lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
     lastMessageTime: serverTimestamp(),
   });
-
-  // Send notifications to other participants
-  const senderProfile = await getUserProfile(currentUser.uid);
-  if (senderProfile) {
-    if (isGroup) {
-      // For group chats, notify all participants except sender
-      for (const participantId of participants) {
-        if (participantId !== currentUser.uid) {
-          createGroupNotification(
-            chatData.name || 'Group Chat',
-            `${senderProfile.displayName || 'Someone'} sent a message`,
-            chatId
-          );
-        }
-      }
-    } else {
-      // For direct messages, notify the recipient
-      const recipientId = participants.find((id: string) => id !== currentUser.uid);
-      if (recipientId) {
-        createMessageNotification({
-          uid: currentUser.uid,
-          displayName: senderProfile.displayName || 'Unknown User',
-          photoURL: senderProfile.photoURL,
-          online: senderProfile.online || false
-        }, text || (attachment ? `Sent ${attachment.type}` : ''), chatId);
-      }
-    }
-  }
 
   return messageRef.id;
 };
