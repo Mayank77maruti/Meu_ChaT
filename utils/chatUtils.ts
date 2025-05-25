@@ -11,7 +11,8 @@ import {
   doc,
   updateDoc,
   arrayUnion,
-  getDoc
+  getDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { encryptMessage, decryptMessage } from './crypto';
 import CryptoJS from 'crypto-js';
@@ -59,6 +60,7 @@ export interface Chat {
   createdAt?: Date;
   pinnedMessage?: string;
   pinnedAt?: Date;
+  unseenMessageCount?: number;
 }
 
 export interface UserProfile {
@@ -92,10 +94,11 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
     where('participants', 'array-contains', currentUser.uid)
   );
 
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(q, async (snapshot) => {
     const chats: Chat[] = [];
-    snapshot.forEach((doc) => {
+    for (const doc of snapshot.docs) {
       const data = doc.data();
+      const unseenCount = await getUnseenMessageCount(doc.id, currentUser.uid);
       chats.push({
         id: doc.id,
         participants: data.participants,
@@ -107,8 +110,9 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
         createdAt: data.createdAt?.toDate(),
         pinnedMessage: data.pinnedMessage,
         pinnedAt: data.pinnedAt?.toDate(),
+        unseenMessageCount: unseenCount
       });
-    });
+    }
     // Sort chats client-side
     chats.sort((a, b) => {
       if (!a.lastMessageTime) return 1;
@@ -261,6 +265,9 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
       }
     }
 
+    // Track messages that need to be marked as read
+    const messagesToMarkAsRead: string[] = [];
+
     for (const doc of snapshot.docs) {
       const data = doc.data();
       let decryptedText = '';
@@ -272,10 +279,10 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
             ? data.senderEncryptedText 
             : data.encryptedText;
             
-          if (!encryptedText) {
-            decryptedText = '[Encrypted Message]';
-          } else {
+          if (encryptedText && privateKeyJwk) {
             decryptedText = await decryptMessage(encryptedText, privateKeyJwk);
+          } else {
+            decryptedText = '[Encrypted Message]';
           }
         } catch (error) {
           console.error('Error decrypting message:', error);
@@ -283,6 +290,11 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         }
       } else {
         decryptedText = data.text || '';
+      }
+
+      // If message is from another user and not read, mark it for reading
+      if (data.senderId !== currentUser.uid && !data.read) {
+        messagesToMarkAsRead.push(doc.id);
       }
 
       messages.push({
@@ -299,6 +311,17 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         linkPreview: data.linkPreview
       });
     }
+
+    // Mark messages as read in batch
+    if (messagesToMarkAsRead.length > 0) {
+      const batch = writeBatch(db);
+      messagesToMarkAsRead.forEach(messageId => {
+        const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+        batch.update(messageRef, { read: true });
+      });
+      await batch.commit();
+    }
+
     callback(messages);
   });
 };
@@ -483,6 +506,7 @@ export const searchGroups = async (searchTerm: string): Promise<Chat[]> => {
         createdAt: data.createdAt?.toDate(),
         pinnedMessage: data.pinnedMessage,
         pinnedAt: data.pinnedAt?.toDate(),
+        unseenMessageCount: data.unseenMessageCount || 0,
       });
     }
   });
@@ -565,4 +589,16 @@ const fetchLinkPreview = async (url: string) => {
     console.error('Error fetching link preview:', error);
     return null;
   }
+};
+
+export const getUnseenMessageCount = async (chatId: string, userId: string): Promise<number> => {
+  const messagesRef = collection(db, 'chats', chatId, 'messages');
+  const q = query(
+    messagesRef,
+    where('senderId', '!=', userId),
+    where('read', '==', false)
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.size;
 }; 

@@ -1035,8 +1035,13 @@ const ChatPage = () => {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">
+                      <p className="text-sm font-medium text-white truncate flex items-center">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
+                        {(chat.unseenMessageCount ?? 0) > 0 && (
+                          <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-500 text-white rounded-full">
+                            {chat.unseenMessageCount}
+                          </span>
+                        )}
                       </p>
                       <p className="text-sm text-gray-400 truncate">
                         {incomingCall && incomingCall.chatId === chat.id ? (
