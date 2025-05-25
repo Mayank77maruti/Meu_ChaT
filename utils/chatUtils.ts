@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { encryptMessage, decryptMessage } from './crypto';
 import CryptoJS from 'crypto-js';
+import { createMessageNotification, createGroupNotification } from './notificationUtils';
 
 // Types
 export interface Message {
@@ -38,6 +39,13 @@ export interface Message {
     messageId: string;
     senderId: string;
     text: string;
+  };
+  linkPreview?: {
+    url: string;
+    title: string;
+    description?: string;
+    image?: string;
+    siteName?: string;
   };
 }
 
@@ -135,13 +143,26 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   const participants = chatData.participants;
   const isGroup = chatData.isGroup || false;
 
+  // Check for URLs in the message
+  const urls = extractUrls(text);
+  let linkPreview = null;
+  
+  if (urls.length > 0) {
+    // Get preview for the first URL found
+    linkPreview = await fetchLinkPreview(urls[0]);
+  }
+
   let messageData: any = {
-    text: text, // Store plain text for group chats
+    text: text,
     senderId: currentUser.uid,
     timestamp: serverTimestamp(),
     read: false,
     reactions: {},
   };
+
+  if (linkPreview) {
+    messageData.linkPreview = linkPreview;
+  }
 
   // Only encrypt for direct messages (not group chats)
   if (!isGroup) {
@@ -174,6 +195,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
       read: false,
       reactions: {},
     };
+
+    if (linkPreview) {
+      messageData.linkPreview = linkPreview;
+    }
   }
 
   if (attachment) {
@@ -190,6 +215,34 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
     lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
     lastMessageTime: serverTimestamp(),
   });
+
+  // Send notifications to other participants
+  const senderProfile = await getUserProfile(currentUser.uid);
+  if (senderProfile) {
+    if (isGroup) {
+      // For group chats, notify all participants except sender
+      for (const participantId of participants) {
+        if (participantId !== currentUser.uid) {
+          createGroupNotification(
+            chatData.name || 'Group Chat',
+            `${senderProfile.displayName || 'Someone'} sent a message`,
+            chatId
+          );
+        }
+      }
+    } else {
+      // For direct messages, notify the recipient
+      const recipientId = participants.find((id: string) => id !== currentUser.uid);
+      if (recipientId) {
+        createMessageNotification({
+          uid: currentUser.uid,
+          displayName: senderProfile.displayName || 'Unknown User',
+          photoURL: senderProfile.photoURL,
+          online: senderProfile.online || false
+        }, text || (attachment ? `Sent ${attachment.type}` : ''), chatId);
+      }
+    }
+  }
 
   return messageRef.id;
 };
@@ -271,7 +324,8 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         pinned: data.pinned || false,
         reactions: data.reactions || {},
         attachment: data.attachment,
-        replyTo: data.replyTo
+        replyTo: data.replyTo,
+        linkPreview: data.linkPreview
       });
     }
     callback(messages);
@@ -471,5 +525,33 @@ export const unpinMessage = async (chatId: string) => {
       pinnedMessage: null,
       pinnedAt: null
     });
+  }
+};
+
+// Function to extract URLs from text
+const extractUrls = (text: string): string[] => {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  return text.match(urlRegex) || [];
+};
+
+// Function to fetch link preview data
+const fetchLinkPreview = async (url: string) => {
+  try {
+    const response = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`);
+    const data = await response.json();
+    
+    if (data.status === 'success') {
+      return {
+        url: data.data.url,
+        title: data.data.title,
+        description: data.data.description,
+        image: data.data.image?.url,
+        siteName: data.data.publisher
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching link preview:', error);
+    return null;
   }
 }; 
