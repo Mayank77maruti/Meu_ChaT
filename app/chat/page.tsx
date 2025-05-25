@@ -4,8 +4,8 @@ import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline';
-import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction, pinMessage, unpinMessage } from '../../utils/chatUtils';
+import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon, PaperAirplaneIcon, AtSymbolIcon } from '@heroicons/react/24/outline';
+import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction, pinMessage, unpinMessage, getUnreadMentionsCount, markMentionAsRead } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
 import { listenToUserStatus } from '../../utils/userUtils';
@@ -60,6 +60,12 @@ const ChatPage = () => {
   const [messageId, setMessageId] = useState<string | null>(null);
   const [isPinnedMessageDropdownOpen, setIsPinnedMessageDropdownOpen] = useState(false);
   const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
+  const [mentionSuggestions, setMentionSuggestions] = useState<{uid: string; displayName: string}[]>([]);
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
+  const [mentionSearchTerm, setMentionSearchTerm] = useState('');
+  const [mentionStartIndex, setMentionStartIndex] = useState(-1);
+  const mentionDropdownRef = useRef<HTMLDivElement>(null);
+  const [unreadMentions, setUnreadMentions] = useState<{[chatId: string]: number}>({});
 
   // Close pinned message dropdown when clicking outside
   useEffect(() => {
@@ -181,33 +187,25 @@ const ChatPage = () => {
     };
   }, [selectedChat]);
 
-  // Separate effect for message scrolling
+  // Add effect to handle message scrolling and mention notifications
   useEffect(() => {
-    const messageId = searchParams.get('messageId');
-    if (messageId && selectedChat && messages.length > 0) {
-      // Wait for messages to be loaded and rendered
-      const scrollToMessage = () => {
-        const messageElement = messageRefs.current[messageId];
-        if (messageElement) {
-          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          messageElement.classList.add('bg-violet-50', 'dark:bg-violet-900');
-          setTimeout(() => {
-            messageElement.classList.remove('bg-violet-50', 'dark:bg-violet-900');
-            // Clear messageId from URL
-            const newUrl = new URL(window.location.href);
-            newUrl.searchParams.delete('messageId');
-            window.history.replaceState({}, '', newUrl.toString());
-          }, 2000);
-        } else {
-          // If message element is not found, try again after a short delay
-          setTimeout(scrollToMessage, 100);
-        }
-      };
+    if (!selectedChat || !user || !messages.length) return;
 
-      // Start the scrolling process
-      scrollToMessage();
+    // Find the first message with an unread mention
+    const messageWithMention = messages.find(message => message.hasUnreadMention);
+    
+    if (messageWithMention) {
+      // Scroll to the message with the mention
+      const messageElement = messageRefs.current[messageWithMention.id];
+      if (messageElement) {
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        messageElement.classList.add('bg-violet-50', 'dark:bg-violet-900');
+        setTimeout(() => {
+          messageElement.classList.remove('bg-violet-50', 'dark:bg-violet-900');
+        }, 2000);
+      }
     }
-  }, [searchParams, selectedChat, messages]);
+  }, [selectedChat, user, messages]);
 
   useEffect(() => {
     if (!user) return;
@@ -522,8 +520,137 @@ const ChatPage = () => {
     );
   };
 
+  // Add function to get group participants for mentions
+  const getGroupParticipants = useCallback(async (chatId: string) => {
+    const chat = chats.find(c => c.id === chatId);
+    if (!chat?.isGroup) return [];
+
+    const participants: {uid: string; displayName: string}[] = [];
+    for (const participantId of chat.participants) {
+      if (participantId !== user?.uid) {
+        const profile = await getUserProfile(participantId);
+        if (profile) {
+          participants.push({
+            uid: participantId,
+            displayName: profile.displayName || 'Unknown User'
+          });
+        }
+      }
+    }
+    return participants;
+  }, [chats, user]);
+
+  // Handle mention input
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setNewMessage(value);
+    handleTyping();
+
+    // Check if this is a group chat
+    const currentChat = chats.find(c => c.id === selectedChat);
+    if (!currentChat?.isGroup) {
+      setShowMentionSuggestions(false);
+      return;
+    }
+
+    // Check for @ symbol
+    const lastAtIndex = value.lastIndexOf('@');
+    if (lastAtIndex !== -1) {
+      const searchTerm = value.slice(lastAtIndex + 1).split(' ')[0];
+      setMentionSearchTerm(searchTerm);
+      setMentionStartIndex(lastAtIndex);
+      setShowMentionSuggestions(true);
+    } else {
+      setShowMentionSuggestions(false);
+      setMentionSearchTerm('');
+    }
+  };
+
+  // Update mention suggestions when search term changes
+  useEffect(() => {
+    const updateMentionSuggestions = async () => {
+      if (!selectedChat) {
+        setMentionSuggestions([]);
+        return;
+      }
+
+      const participants = await getGroupParticipants(selectedChat);
+      if (!mentionSearchTerm) {
+        // Show all participants when just @ is typed
+        setMentionSuggestions(participants);
+        return;
+      }
+
+      const filtered = participants.filter(p => 
+        p.displayName.toLowerCase().includes(mentionSearchTerm.toLowerCase())
+      );
+      setMentionSuggestions(filtered);
+    };
+
+    updateMentionSuggestions();
+  }, [mentionSearchTerm, selectedChat, getGroupParticipants]);
+
+  // Handle mention selection
+  const handleMentionSelect = (user: {uid: string; displayName: string}) => {
+    if (mentionStartIndex === -1) return;
+
+    const beforeMention = newMessage.slice(0, mentionStartIndex);
+    const afterMention = newMessage.slice(mentionStartIndex + mentionSearchTerm.length + 1);
+    setNewMessage(`${beforeMention}@${user.displayName} ${afterMention}`);
+    setShowMentionSuggestions(false);
+  };
+
+  // Close mention suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (mentionDropdownRef.current && !mentionDropdownRef.current.contains(event.target as Node)) {
+        setShowMentionSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Add effect to track unread mentions
+  useEffect(() => {
+    if (!user) return;
+
+    const updateUnreadMentions = async () => {
+      const mentions: {[chatId: string]: number} = {};
+      for (const chat of chats) {
+        const count = await getUnreadMentionsCount(chat.id, user.uid);
+        if (count > 0) {
+          mentions[chat.id] = count;
+        }
+      }
+      setUnreadMentions(mentions);
+    };
+
+    updateUnreadMentions();
+  }, [chats, user]);
+
+  // Add effect to mark mentions as read when viewing messages
+  useEffect(() => {
+    if (!selectedChat || !user || !messages.length) return;
+
+    const markMentionsAsRead = async () => {
+      for (const message of messages) {
+        const isMentioned = message.mentions?.some(m => m.userId === user.uid);
+        if (isMentioned) {
+          await markMentionAsRead(selectedChat, user.uid, message.id);
+        }
+      }
+    };
+
+    markMentionsAsRead();
+  }, [selectedChat, user, messages]);
+
+  // Update message rendering to handle mentions
   const renderMessageContent = (message: Message) => {
     const isCurrentUser = message.senderId === user?.uid;
+    const isMentioned = message.mentions?.some(m => m.userId === user?.uid);
+    
     const messageRef = (el: HTMLDivElement | null) => {
       if (el && message.id === messageId) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -533,6 +660,22 @@ const ChatPage = () => {
         }, 100);
       }
       messageRefs.current[message.id] = el;
+    };
+
+    // Process message text to highlight mentions
+    const processMessageText = (text: string) => {
+      if (!message.mentions?.length) return text;
+
+      let processedText = text;
+      message.mentions.forEach(mention => {
+        const mentionRegex = new RegExp(`@${mention.displayName}`, 'g');
+        const isCurrentUserMentioned = mention.userId === user?.uid;
+        processedText = processedText.replace(
+          mentionRegex,
+          `<span class="text-violet-400 font-medium ${isCurrentUserMentioned ? 'bg-violet-100 dark:bg-violet-900/50 px-1 rounded' : ''}">@${mention.displayName}</span>`
+        );
+      });
+      return processedText;
     };
 
     return (
@@ -551,10 +694,12 @@ const ChatPage = () => {
             <span className="text-xs text-gray-400 dark:text-gray-500">
               {new Date(message.timestamp).toLocaleTimeString()}
             </span>
+            {isMentioned && (
+              <AtSymbolIcon className="w-4 h-4 text-violet-500" />
+            )}
           </div>
           
           <div className={`flex ${isCurrentUser ? 'flex-row' : 'flex-row-reverse'} items-start gap-2 w-full`}>
-            {/* Emoji Reaction Button - Only show for received messages */}
             {!isCurrentUser && (
               <div className="relative invisible group-hover:visible">
                 <EmojiPicker
@@ -570,7 +715,6 @@ const ChatPage = () => {
                 ? 'bg-violet-600 text-white' 
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
             } min-w-[80px] min-h-[32px] flex items-center flex-col items-start w-full break-words`}>
-              {/* Display replied-to message preview inside the bubble */}
               {message.replyTo && (
                 <div className={`border-l-2 ${isCurrentUser ? 'border-violet-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
                   <p className={`text-xs font-medium ${isCurrentUser ? 'text-violet-200' : 'text-green-600'} mb-0.5`}>
@@ -583,36 +727,34 @@ const ChatPage = () => {
                   </p>
                 </div>
               )}
-              <div className="w-full">
-                {message.text}
-                {message.attachment && (
-                  <div className="mt-2">
-                    {message.attachment.type === 'image' && (
-                      <img 
-                        src={message.attachment.url} 
-                        alt={message.attachment.name || 'Image'} 
-                        className="max-w-full rounded-lg"
-                      />
-                    )}
-                    {message.attachment.type === 'video' && (
-                      <video 
-                        src={message.attachment.url} 
-                        controls
-                        className="max-w-full rounded-lg"
-                      />
-                    )}
-                    {message.attachment.type === 'file' && (
-                      <div className="flex items-center space-x-1 text-xs">
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                        </svg>
-                        <span>{message.attachment.name || 'File'}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {message.linkPreview && <LinkPreview preview={message.linkPreview} />}
-              </div>
+              <div className="w-full" dangerouslySetInnerHTML={{ __html: processMessageText(message.text) }} />
+              {message.attachment && (
+                <div className="mt-2">
+                  {message.attachment.type === 'image' && (
+                    <img 
+                      src={message.attachment.url} 
+                      alt={message.attachment.name || 'Image'} 
+                      className="max-w-full rounded-lg"
+                    />
+                  )}
+                  {message.attachment.type === 'video' && (
+                    <video 
+                      src={message.attachment.url} 
+                      controls
+                      className="max-w-full rounded-lg"
+                    />
+                  )}
+                  {message.attachment.type === 'file' && (
+                    <div className="flex items-center space-x-1 text-xs">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span>{message.attachment.name || 'File'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {message.linkPreview && <LinkPreview preview={message.linkPreview} />}
             </div>
           </div>
 
@@ -802,12 +944,6 @@ const ChatPage = () => {
     typingTimeoutRef.current = setTimeout(() => {
       set(ref(rtdb, `typing/${selectedChat}/${user.uid}`), false);
     }, 3000);
-  };
-
-  // Update message input to trigger typing status
-  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setNewMessage(e.target.value);
-    handleTyping();
   };
 
   // Get typing users display text
@@ -1002,6 +1138,7 @@ const ChatPage = () => {
               const otherParticipantId = !isGroupChat ? chat.participants.find(id => id !== user?.uid) : null;
               const otherParticipant = !isGroupChat ? chatParticipants[otherParticipantId || ''] : null;
               const isOnline = !isGroupChat ? onlineUsers[otherParticipantId || ''] : false;
+              const unreadMentionCount = unreadMentions[chat.id] || 0;
               
               return (
                 <div
@@ -1037,7 +1174,13 @@ const ChatPage = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate flex items-center">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
-                        {(chat.unseenMessageCount ?? 0) > 0 && (
+                        {unreadMentionCount > 0 && (
+                          <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-500 text-white rounded-full flex items-center">
+                            <AtSymbolIcon className="w-3 h-3 mr-0.5" />
+                            {unreadMentionCount}
+                          </span>
+                        )}
+                        {(chat.unseenMessageCount ?? 0) > 0 && !unreadMentionCount && (
                           <span className="ml-2 px-2 py-0.5 text-xs font-medium bg-violet-500 text-white rounded-full">
                             {chat.unseenMessageCount}
                           </span>
@@ -1153,7 +1296,7 @@ const ChatPage = () => {
                       </button>
                     </div>
                   )}
-                  <div className="flex space-x-2 sm:space-x-4">
+                  <div className="flex space-x-2 sm:space-x-4 relative">
                     <CldUploadWidget
                       uploadPreset="chat_attachments"
                       onSuccess={handleUploadSuccess}
@@ -1198,13 +1341,36 @@ const ChatPage = () => {
                         <MicrophoneIcon className="w-6 h-6" />
                       )}
                     </button>
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={handleMessageChange}
-                      placeholder="Type a message..."
-                      className="flex-1 rounded-lg border border-white/10 bg-white/5 text-white placeholder-gray-400 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    />
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={newMessage}
+                        onChange={handleMessageChange}
+                        placeholder="Type a message..."
+                        className="w-full rounded-lg border border-white/10 bg-white/5 text-white placeholder-gray-400 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                      {showMentionSuggestions && mentionSuggestions.length > 0 && (
+                        <div
+                          ref={mentionDropdownRef}
+                          className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 max-h-48 overflow-y-auto"
+                        >
+                          {mentionSuggestions.map(user => (
+                            <button
+                              key={user.uid}
+                              onClick={() => handleMentionSelect(user)}
+                              className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                            >
+                              <div className="w-6 h-6 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                                <span className="text-xs text-violet-600 dark:text-violet-300">
+                                  {user.displayName[0].toUpperCase()}
+                                </span>
+                              </div>
+                              <span>{user.displayName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button
                       type="submit"
                       disabled={!newMessage.trim()}

@@ -28,6 +28,11 @@ export interface Message {
   read: boolean;
   pinned?: boolean;
   reactions?: { [emoji: string]: string[] };
+  mentions?: {
+    userId: string;
+    displayName: string;
+    notified?: boolean;
+  }[];
   attachment?: {
     type: 'image' | 'file' | 'voice' | 'video';
     url: string;
@@ -47,6 +52,7 @@ export interface Message {
     image?: string;
     siteName?: string;
   };
+  hasUnreadMention?: boolean;
 }
 
 export interface Chat {
@@ -146,6 +152,33 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   const participants = chatData.participants;
   const isGroup = chatData.isGroup || false;
 
+  // Process mentions for group chats
+  let mentions: { userId: string; displayName: string; notified: boolean; }[] = [];
+  if (isGroup) {
+    const mentionRegex = /@(\w+)/g;
+    const mentionMatches = text.matchAll(mentionRegex);
+    
+    for (const match of mentionMatches) {
+      const mentionedUsername = match[1];
+      // Get user profile for the mentioned username
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('displayName', '==', mentionedUsername));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userData = userDoc.data();
+        if (participants.includes(userDoc.id)) {
+          mentions.push({
+            userId: userDoc.id,
+            displayName: userData.displayName,
+            notified: false
+          });
+        }
+      }
+    }
+  }
+
   // Check for URLs in the message
   const urls = extractUrls(text);
   let linkPreview = null;
@@ -165,6 +198,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
 
   if (linkPreview) {
     messageData.linkPreview = linkPreview;
+  }
+
+  if (mentions.length > 0) {
+    messageData.mentions = mentions;
   }
 
   // Only encrypt for direct messages (not group chats)
@@ -202,6 +239,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
     if (linkPreview) {
       messageData.linkPreview = linkPreview;
     }
+
+    if (mentions.length > 0) {
+      messageData.mentions = mentions;
+    }
   }
 
   if (attachment) {
@@ -214,10 +255,35 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
 
   const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
 
-  await updateDoc(doc(db, 'chats', chatId), {
-    lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
-    lastMessageTime: serverTimestamp(),
-  });
+  // Update chat document with mention notifications
+  if (mentions.length > 0) {
+    const chatRef = doc(db, 'chats', chatId);
+    const chatData = await getDoc(chatRef);
+    const currentData = chatData.data() || {};
+    const mentionNotifications = currentData.mentionNotifications || {};
+    
+    mentions.forEach(mention => {
+      if (!mentionNotifications[mention.userId]) {
+        mentionNotifications[mention.userId] = [];
+      }
+      mentionNotifications[mention.userId].push({
+        messageId: messageRef.id,
+        timestamp: Date.now(), // Use regular timestamp instead of serverTimestamp
+        read: false
+      });
+    });
+
+    await updateDoc(chatRef, {
+      lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
+      lastMessageTime: serverTimestamp(),
+      mentionNotifications
+    });
+  } else {
+    await updateDoc(doc(db, 'chats', chatId), {
+      lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
+      lastMessageTime: serverTimestamp(),
+    });
+  }
 
   return messageRef.id;
 };
@@ -240,6 +306,7 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
     if (!chatDoc.exists()) return;
 
     const isGroup = chatDoc.data().isGroup || false;
+    const chatData = chatDoc.data();
 
     // Only get private key for direct messages
     let privateKeyJwk = null;
@@ -267,6 +334,12 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
 
     // Track messages that need to be marked as read
     const messagesToMarkAsRead: string[] = [];
+    const batch = writeBatch(db);
+
+    // Check for mention notifications
+    const mentionNotifications = chatData.mentionNotifications || {};
+    const userMentions = mentionNotifications[currentUser.uid] || [];
+    const unreadMentions = userMentions.filter((mention: any) => !mention.read);
 
     for (const doc of snapshot.docs) {
       const data = doc.data();
@@ -297,6 +370,9 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         messagesToMarkAsRead.push(doc.id);
       }
 
+      // Check if this message has an unread mention
+      const hasUnreadMention = unreadMentions.some((mention: any) => mention.messageId === doc.id);
+
       messages.push({
         id: doc.id,
         chatId,
@@ -308,19 +384,37 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         reactions: data.reactions || {},
         attachment: data.attachment,
         replyTo: data.replyTo,
-        linkPreview: data.linkPreview
+        linkPreview: data.linkPreview,
+        hasUnreadMention
       });
     }
 
     // Mark messages as read in batch
     if (messagesToMarkAsRead.length > 0) {
-      const batch = writeBatch(db);
       messagesToMarkAsRead.forEach(messageId => {
         const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
         batch.update(messageRef, { read: true });
       });
-      await batch.commit();
     }
+
+    // Mark all mention notifications as read
+    if (unreadMentions.length > 0) {
+      const updatedMentions = userMentions.map((mention: any) => ({
+        ...mention,
+        read: true
+      }));
+      
+      const updatedNotifications = {
+        ...mentionNotifications,
+        [currentUser.uid]: updatedMentions
+      };
+      
+      const chatRef = doc(db, 'chats', chatId);
+      batch.update(chatRef, { mentionNotifications: updatedNotifications });
+    }
+
+    // Commit all updates
+    await batch.commit();
 
     callback(messages);
   });
@@ -601,4 +695,38 @@ export const getUnseenMessageCount = async (chatId: string, userId: string): Pro
 
   const snapshot = await getDocs(q);
   return snapshot.size;
+};
+
+// Add function to mark mention as read
+export const markMentionAsRead = async (chatId: string, userId: string, messageId: string) => {
+  const chatRef = doc(db, 'chats', chatId);
+  const chatDoc = await getDoc(chatRef);
+  
+  if (!chatDoc.exists()) return;
+  
+  const chatData = chatDoc.data();
+  const mentionNotifications = chatData.mentionNotifications || {};
+  
+  if (mentionNotifications[userId]) {
+    mentionNotifications[userId] = mentionNotifications[userId].map((notification: any) => {
+      if (notification.messageId === messageId) {
+        return { ...notification, read: true };
+      }
+      return notification;
+    });
+    
+    await updateDoc(chatRef, { mentionNotifications });
+  }
+};
+
+// Add function to get unread mentions count
+export const getUnreadMentionsCount = async (chatId: string, userId: string): Promise<number> => {
+  const chatDoc = await getDoc(doc(db, 'chats', chatId));
+  if (!chatDoc.exists()) return 0;
+  
+  const chatData = chatDoc.data();
+  const mentionNotifications = chatData.mentionNotifications || {};
+  const userNotifications = mentionNotifications[userId] || [];
+  
+  return userNotifications.filter((notification: any) => !notification.read).length;
 }; 
