@@ -9,6 +9,7 @@ export interface UserProfile {
   photoURL?: string;
   online: boolean;
   lastSeen?: Date;
+  email?: string;
 }
 
 // Search users by display name

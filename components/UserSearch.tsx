@@ -216,17 +216,19 @@ export default function UserSearch() {
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
-                          {result.user?.displayName?.[0]?.toUpperCase() || '?'}
+                        <div className="w-full h-full flex items-center justify-center">
+                          <span className="text-lg text-gray-500 dark:text-gray-400">
+                            {result.user?.displayName?.[0]?.toUpperCase() || '?'}
+                          </span>
                         </div>
                       )}
                     </div>
                     <div>
                       <p className="font-medium text-gray-900 dark:text-white">
-                        {result.user?.displayName}
+                        {result.user?.displayName || 'Unknown User'}
                       </p>
                       <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {result.user?.online ? 'Online' : 'Offline'}
+                        {result.user?.email}
                       </p>
                     </div>
                   </button>
@@ -253,10 +255,7 @@ export default function UserSearch() {
                 ) : (
                   <button
                     key={`message-${result.message?.id}`}
-                    onClick={() => {
-                      console.log('Message result clicked:', result.message?.id);
-                      handleMessageClick(result.chatId!, result.message!.id);
-                    }}
+                    onClick={() => handleMessageClick(result.chatId!, result.message!.id)}
                     className="w-full p-3 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center space-x-3 text-left"
                   >
                     <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
@@ -290,8 +289,16 @@ export default function UserSearch() {
                         </span>
                       </div>
                       <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                        {result.message?.text}
+                        {result.message?.text || '[Encrypted Message]'}
                       </p>
+                      {result.message?.attachment && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                          {result.message.attachment.type === 'image' ? '📷 Image' :
+                           result.message.attachment.type === 'file' ? '📎 File' :
+                           result.message.attachment.type === 'voice' ? '🎤 Voice Message' :
+                           result.message.attachment.type === 'video' ? '🎥 Video' : 'Attachment'}
+                        </p>
+                      )}
                     </div>
                   </button>
                 )
