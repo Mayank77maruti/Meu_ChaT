@@ -7,7 +7,7 @@ import { auth } from '../../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import Link from 'next/link';
 import { generateKeyPair } from '../../utils/crypto';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 const Login = () => {
@@ -25,25 +25,33 @@ const Login = () => {
     setLoading(true);
     setError('');
     try {
-        await signInWithEmailAndPassword(auth, email, password);
-        const user = auth.currentUser;
-        if (user) {
-          const uid = user.uid;
-          const userDocRef = doc(db, 'users', uid);
-          const userDocSnap = await getDoc(userDocRef);
-          if (userDocSnap.exists()) {
-            const userData = userDocSnap.data();
-            const publicKeyString = userData.publicKey;
-            if (publicKeyString) {
-              const encryptedPrivateKey = localStorage.getItem('privateKey');
-              if (encryptedPrivateKey) {
-                const decryptedPrivateKey = CryptoJS.AES.decrypt(encryptedPrivateKey, password).toString(CryptoJS.enc.Utf8);
-                console.log("Decrypted private key:", decryptedPrivateKey);
-              }
+      await signInWithEmailAndPassword(auth, email, password);
+      const user = auth.currentUser;
+      if (user) {
+        const uid = user.uid;
+        const userDocRef = doc(db, 'users', uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          const publicKey = userData.publicKey;
+          if (publicKey) {
+            const privateKey = localStorage.getItem('privateKey');
+            if (!privateKey) {
+              // Generate new key pair if private key is missing
+              const keyPair = await generateKeyPair();
+              localStorage.setItem('privateKey', JSON.stringify(keyPair.privateKey));
+              await fetch('/api/updateUserPublicKey', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ uid: uid, publicKey: keyPair.publicKey }),
+              });
             }
           }
         }
-        router.push('/chat');
+      }
+      router.push('/chat');
     } catch (error: any) {
       if (error.code === 'auth/user-not-found') {
         setError('User not found. Please check your email or sign up.');
@@ -65,30 +73,48 @@ const Login = () => {
       const user = result.user;
       if (user) {
         const uid = user.uid;
+        
+        // Check if user document exists in Firestore
         const userDocRef = doc(db, 'users', uid);
         const userDocSnap = await getDoc(userDocRef);
-        let publicKeyBase64 = null;
-        if (!userDocSnap.exists() || !userDocSnap.data()?.publicKey) {
-          const { publicKey, privateKey } = await generateKeyPair();
-          const publicKeyString = await window.crypto.subtle.exportKey("spki", publicKey);
-          publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyString)));
-
-          const encryptedPrivateKey = CryptoJS.AES.encrypt(JSON.stringify(privateKey), password).toString();
-          localStorage.setItem('privateKey', encryptedPrivateKey);
-
-          await fetch('/api/updateUserPublicKey', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ uid: uid, publicKey: publicKeyBase64 }),
+        
+        if (!userDocSnap.exists()) {
+        console.log("new user");
+          // Generate key pair for new user
+          const keyPair = await generateKeyPair();
+          
+          // Store private key in local storage
+          localStorage.setItem('privateKey', JSON.stringify(keyPair.privateKey));
+          
+          // Create new user document with all required fields
+          await setDoc(userDocRef, {
+            email: user.email,
+            displayName: user.displayName || user.email?.split('@')[0],
+            publicKey: keyPair.publicKey,
+            uid: uid,
+            createdAt: serverTimestamp(),
+            photoURL: user.photoURL || null,
+            provider: 'google'
           });
         } else {
-          publicKeyBase64 = userDocSnap.data().publicKey;
+          console.log("existing user");
+          // User exists, ensure we have their private key
+          const privateKey = localStorage.getItem('privateKey');
+          if (!privateKey) {
+            // Generate new key pair if private key is missing
+            const keyPair = await generateKeyPair();
+            localStorage.setItem('privateKey', JSON.stringify(keyPair.privateKey));
+            
+            // Update user's public key
+            await updateDoc(userDocRef, {
+              publicKey: keyPair.publicKey
+            });
+          }
         }
       }
       router.push('/chat');
     } catch (error: any) {
+      console.error('Google sign-in error:', error);
       setError('Google sign-in failed. Please try again.');
     }
   };
