@@ -3,9 +3,9 @@ import { Suspense } from "react";
 import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon } from '@heroicons/react/24/outline';
-import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
+import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction, pinMessage, unpinMessage } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
 import { listenToUserStatus } from '../../utils/userUtils';
@@ -32,6 +32,7 @@ const ChatPage = () => {
   const [chatParticipants, setChatParticipants] = useState<{[key: string]: any}>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
   const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
   const [selectedReactions, setSelectedReactions] = useState<{messageId: string, reactions: {[emoji: string]: string[]}} | null>(null);
@@ -54,6 +55,28 @@ const ChatPage = () => {
     type: 'audio' | 'video';
     chatId: string;
   } | null>(null);
+  const [messageToScroll, setMessageToScroll] = useState<string | null>(null);
+  const [messageId, setMessageId] = useState<string | null>(null);
+  const [isPinnedMessageDropdownOpen, setIsPinnedMessageDropdownOpen] = useState(false);
+  const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
+
+  // Close pinned message dropdown when clicking outside
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          // Check if the click was outside the dropdown and its trigger
+          // This requires adding refs to the dropdown and trigger if needed for precise detection
+          // For simplicity, we'll close on any click outside for now.
+          setIsPinnedMessageDropdownOpen(false);
+      };
+
+      if (isPinnedMessageDropdownOpen) {
+          document.addEventListener('click', handleClickOutside);
+      }
+
+      return () => {
+          document.removeEventListener('click', handleClickOutside);
+      };
+  }, [isPinnedMessageDropdownOpen]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -115,9 +138,15 @@ const ChatPage = () => {
   }, [user]);
 
   useEffect(() => {
+    const chatId = searchParams.get('chatId');
+    if (chatId !== selectedChat) {
+      setSelectedChat(chatId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!selectedChat) return;
 
-    // Subscribe to messages
     const unsubscribeMessages = getMessages(selectedChat, (updatedMessages) => {
       setMessages(updatedMessages);
       scrollToBottom();
@@ -127,6 +156,34 @@ const ChatPage = () => {
       unsubscribeMessages();
     };
   }, [selectedChat]);
+
+  // Separate effect for message scrolling
+  useEffect(() => {
+    const messageId = searchParams.get('messageId');
+    if (messageId && selectedChat && messages.length > 0) {
+      // Wait for messages to be loaded and rendered
+      const scrollToMessage = () => {
+        const messageElement = messageRefs.current[messageId];
+        if (messageElement) {
+          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          messageElement.classList.add('bg-blue-50', 'dark:bg-blue-900');
+          setTimeout(() => {
+            messageElement.classList.remove('bg-blue-50', 'dark:bg-blue-900');
+            // Clear messageId from URL
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('messageId');
+            window.history.replaceState({}, '', newUrl.toString());
+          }, 2000);
+        } else {
+          // If message element is not found, try again after a short delay
+          setTimeout(scrollToMessage, 100);
+        }
+      };
+
+      // Start the scrolling process
+      scrollToMessage();
+    }
+  }, [searchParams, selectedChat, messages]);
 
   useEffect(() => {
     if (!user) return;
@@ -235,11 +292,24 @@ const ChatPage = () => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChat || !newMessage.trim()) return;
+    if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return; // Allow sending empty message if it's a reply
+
+    const replyToInfo = replyingToMessage ? {
+      messageId: replyingToMessage.id,
+      senderId: replyingToMessage.senderId,
+      text: replyingToMessage.text,
+    } : undefined;
+
+    // Store the reply info and message before clearing states
+    const currentReplyInfo = replyToInfo;
+    const messageToSend = newMessage.trim();
+    
+    // Clear states immediately
+    setReplyingToMessage(null);
+    setNewMessage('');
 
     try {
-      await sendMessage(selectedChat, newMessage.trim());
-      setNewMessage('');
+      await sendMessage(selectedChat, messageToSend, undefined, currentReplyInfo);
     } catch (error) {
       console.error('Error sending message:', error);
       alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -263,117 +333,282 @@ const ChatPage = () => {
     setSelectedReactions(null);
   };
 
-  const renderMessageContent = (message: Message) => {
-    if (message.attachment) {
-      const attachment = message.attachment;
-      switch (attachment.type) {
+  const setMessageRef = useCallback((messageId: string) => (el: HTMLDivElement | null) => {
+    if (el) {
+      messageRefs.current[messageId] = el;
+    }
+  }, []);
+
+  const handlePinMessage = async (messageId: string) => {
+    try {
+      console.log('Pinning message:', messageId);
+      await pinMessage(selectedChat!, messageId);
+      // Update the message in local state
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, pinned: true }
+            : { ...msg, pinned: false }
+        )
+      );
+    } catch (error) {
+      console.error('Error pinning message:', error);
+    }
+  };
+
+  const handleUnpinMessage = async () => {
+    try {
+      console.log('Unpinning message');
+      await unpinMessage(selectedChat!);
+      // Update the message in local state
+      setMessages(prevMessages => 
+        prevMessages.map(msg => ({ ...msg, pinned: false }))
+      );
+    } catch (error) {
+      console.error('Error unpinning message:', error);
+    }
+  };
+
+  const renderPinnedMessage = () => {
+    if (!selectedChat || !messages.length) return null;
+
+    const pinnedMessage = messages.find(m => m.pinned);
+    console.log('Pinned message:', pinnedMessage);
+    if (!pinnedMessage) return null;
+
+    const handlePinnedMessageClick = () => {
+      const messageElement = messageRefs.current[pinnedMessage.id];
+      if (messageElement) {
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        messageElement.classList.add('bg-blue-50', 'dark:bg-blue-900');
+        setTimeout(() => {
+          messageElement.classList.remove('bg-blue-50', 'dark:bg-blue-900');
+        }, 2000);
+      }
+    };
+
+    const handlePinnedMessageDropdownToggle = (event: React.MouseEvent) => {
+        event.stopPropagation(); // Prevent triggering the main click handler
+        setIsPinnedMessageDropdownOpen(prev => !prev);
+    };
+
+    const handleUnpinClick = (event: React.MouseEvent) => {
+        event.stopPropagation(); // Prevent triggering the main click handler
+        handleUnpinMessage();
+        setIsPinnedMessageDropdownOpen(false); // Close dropdown after unpinning
+    };
+
+    const renderMediaIcon = () => {
+      if (!pinnedMessage.attachment) return null;
+
+      switch (pinnedMessage.attachment.type) {
         case 'image':
           return (
-            <div className="mt-2">
-              <img
-                src={attachment.url}
-                alt="Shared image"
-                className="max-w-sm rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                onClick={() => window.open(attachment.url, '_blank')}
-              />
-            </div>
-          );
-        case 'file':
-          return (
-            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
-              <PaperClipIcon className="w-5 h-5 text-gray-500" />
-              <a
-                href={attachment.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-500 hover:underline"
-              >
-                {attachment.name || 'Download file'}
-              </a>
-              {attachment.size && (
-                <span className="text-sm text-gray-500">
-                  ({(attachment.size / 1024).toFixed(1)} KB)
-                </span>
-              )}
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs text-gray-400">Image</span>
             </div>
           );
         case 'video':
           return (
-            <div className="mt-2">
-              <video
-                controls
-                className="max-w-sm rounded-lg"
-                src={attachment.url}
-              >
-                Your browser does not support the video tag.
-              </video>
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs text-gray-400">Video</span>
+            </div>
+          );
+        case 'file':
+          return (
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs text-gray-400">File</span>
             </div>
           );
         case 'voice':
           return (
-            <div className="mt-2 flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
-              <button
-                onClick={() => handlePlayAudio(attachment.url)}
-                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"
-              >
-                {playingAudio === attachment.url ? (
-                  <PauseIcon className="w-5 h-5 text-gray-500" />
-                ) : (
-                  <PlayIcon className="w-5 h-5 text-gray-500" />
-                )}
-              </button>
-              <div className="flex-1">
-                <div className="h-1 bg-gray-300 dark:bg-gray-600 rounded-full">
-                  <div
-                    className="h-full bg-blue-500 rounded-full"
-                    style={{
-                      width: audioRef.current
-                        ? `${(audioRef.current.currentTime / audioRef.current.duration) * 100}%`
-                        : '0%',
-                    }}
-                  />
-                </div>
-                {attachment.duration && (
-                  <span className="text-sm text-gray-500">
-                    {attachment.duration}s
-                  </span>
-                )}
-              </div>
+            <div className="flex items-center space-x-1">
+              <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              <span className="text-xs text-gray-400">Voice</span>
             </div>
           );
         default:
           return null;
       }
-    }
+    };
 
-    // Check for URLs in the message text
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urls = message.text.match(urlRegex);
-    
-    if (urls) {
-      return (
-        <div>
-          <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-          {urls.map((url, index) => (
-            <div key={index} className="mt-2 max-w-sm rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                <div className="p-3">
-                  <p className="text-sm font-medium text-blue-500 truncate">{url}</p>
-                  <p className="text-xs text-gray-500 mt-1">Click to open link</p>
-                </div>
-              </a>
+    return (
+      <div className="bg-gray-800 border-b border-gray-700 text-white relative z-10">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <button
+            onClick={handlePinnedMessageClick}
+            className="flex items-center space-x-2 flex-1 min-w-0 text-left"
+          >
+            <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-gray-300 truncate">
+                {chats.find(c => c.id === selectedChat)?.isGroup ? chats.find(c => c.id === selectedChat)?.name : selectedChatUser?.displayName || 'Unknown User'}
+              </p>
+              <div className="text-xs text-gray-400 truncate">
+                {pinnedMessage.text || renderMediaIcon()}
+              </div>
             </div>
-          ))}
-        </div>
-      );
-    }
+          </button>
 
-    return <p className="text-sm whitespace-pre-wrap">{message.text}</p>;
+          <div className="relative">
+            {/* Dropdown Trigger */}
+            <button
+              className="p-1 rounded-full hover:bg-gray-700 text-gray-400"
+              onClick={handlePinnedMessageDropdownToggle}
+              aria-expanded={isPinnedMessageDropdownOpen}
+              aria-haspopup="true"
+            >
+              <svg className={`w-4 h-4 transition-transform duration-200 ${isPinnedMessageDropdownOpen ? 'rotate-180' : 'rotate-0'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Dropdown Menu */}
+            {isPinnedMessageDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-40 origin-top-right bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none" role="menu" aria-orientation="vertical" aria-labelledby="options-menu">
+                <div className="py-1" role="none">
+                  <button
+                    onClick={handleUnpinClick}
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700" role="menuitem"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    Unpin
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMessageContent = (message: Message) => {
+    const isCurrentUser = message.senderId === user?.uid;
+    const messageRef = (el: HTMLDivElement | null) => {
+      if (el && message.id === messageId) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+          el.classList.add('highlight-message');
+          setTimeout(() => el.classList.remove('highlight-message'), 2000);
+        }, 100);
+      }
+      messageRefs.current[message.id] = el;
+    };
+
+    return (
+      <div
+        ref={messageRef}
+        key={message.id}
+        className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-1.5 group`}
+      >
+        <div className={`flex flex-col max-w-[60%] ${isCurrentUser ? 'items-end' : 'items-start'}`}>
+          <div className="flex items-center space-x-1.5 mb-0.5">
+            {!isCurrentUser && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {chatParticipants[message.senderId]?.displayName || 'Unknown User'}
+              </span>
+            )}
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              {new Date(message.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+          
+          <div className={`rounded-lg p-3 text-sm ${
+            isCurrentUser 
+              ? 'bg-blue-500 text-white' 
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
+          } min-w-[80px] min-h-[32px] flex items-center flex-col items-start`}>
+            {/* Display replied-to message preview inside the bubble */}
+            {message.replyTo && (
+              <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
+                <p className={`text-xs font-medium ${isCurrentUser ? 'text-blue-200' : 'text-green-600'} mb-0.5`}>
+                  {chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
+                </p>
+                <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
+                  {message.replyTo.text}
+                </p>
+              </div>
+            )}
+            <div className="w-full">
+              {message.text}
+              {message.attachment && (
+                <div className="mt-2">
+                  {message.attachment.type === 'image' && (
+                    <img 
+                      src={message.attachment.url} 
+                      alt={message.attachment.name || 'Image'} 
+                      className="max-w-[250px] rounded-lg"
+                    />
+                  )}
+                  {message.attachment.type === 'video' && (
+                    <video 
+                      src={message.attachment.url} 
+                      controls
+                      className="max-w-[250px] rounded-lg"
+                    />
+                  )}
+                  {message.attachment.type === 'file' && (
+                    <div className="flex items-center space-x-1 text-xs">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span>{message.attachment.name || 'File'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center space-x-1 mt-0.5">
+             {/* Reply Button */}
+             <button
+                onClick={() => handleReplyClick(message)}
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 invisible group-hover:visible"
+                title="Reply"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l3 3m-3-3l3-3" />
+                </svg>
+              </button>
+            {!message.pinned && (
+              <button
+                onClick={() => handlePinMessage(message.id)}
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 invisible group-hover:visible"
+                title="Pin message"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+              </button>
+            )}
+            {message.pinned && (
+              <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center">
+                <svg className="w-3 h-3 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+                Pinned
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -654,6 +889,14 @@ const ChatPage = () => {
     setCallType(null);
   };
 
+  const handleReplyClick = (message: Message) => {
+    setReplyingToMessage(message);
+  };
+
+  const handleCancelReply = () => {
+    setReplyingToMessage(null);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
@@ -674,108 +917,108 @@ const ChatPage = () => {
       {/* Main Chat Area */}
       <div className="flex-1 flex">
         {/* Chat List */}
-      <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-        ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-              aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {isDarkMode ? (
-                <SunIcon className="h-5 w-5 text-gray-200" />
-              ) : (
-                <MoonIcon className="h-5 w-5 text-gray-600" />
-              )}
-            </button>
+        <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
+          ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
+              <button
+                onClick={toggleDarkMode}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {isDarkMode ? (
+                  <SunIcon className="h-5 w-5 text-gray-200" />
+                ) : (
+                  <MoonIcon className="h-5 w-5 text-gray-600" />
+                )}
+              </button>
+            </div>
+            <UserSearch />
           </div>
-          <UserSearch />
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {chats.map((chat) => {
+          <div className="flex-1 overflow-y-auto">
+            {chats.map((chat) => {
               const isGroupChat = chat.isGroup;
               const otherParticipantId = !isGroupChat ? chat.participants.find(id => id !== user?.uid) : null;
               const otherParticipant = !isGroupChat ? chatParticipants[otherParticipantId || ''] : null;
               const isOnline = !isGroupChat ? onlineUsers[otherParticipantId || ''] : false;
-            
-            return (
-              <div
-                key={chat.id}
-                onClick={() => setSelectedChat(chat.id)}
-                className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
-                  selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+              
+              return (
+                <div
+                  key={chat.id}
+                  onClick={() => setSelectedChat(chat.id)}
+                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
+                    selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="relative">
+                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                         {isGroupChat ? (
                           <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
                         ) : otherParticipant?.photoURL ? (
-                        <img
-                          src={otherParticipant.photoURL}
+                          <img
+                            src={otherParticipant.photoURL}
                             alt={otherParticipant.displayName || 'User'}
                             className="w-full h-full rounded-full object-cover"
-                        />
+                          />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
                             {otherParticipant?.displayName?.[0]?.toUpperCase() || '?'}
                           </div>
+                        )}
+                      </div>
+                      {!isGroupChat && (
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                          isOnline ? 'bg-green-500' : 'bg-gray-400'
+                        }`} />
                       )}
                     </div>
-                      {!isGroupChat && (
-                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
-                      isOnline ? 'bg-green-500' : 'bg-gray-400'
-                    }`} />
-                      )}
-                  </div>
-                  <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                      {incomingCall && incomingCall.chatId === chat.id ? (
-                        <span className="flex items-center text-blue-500 font-medium animate-pulse">
-                          {incomingCall.type === 'video' ? (
-                            <VideoCameraIcon className="w-4 h-4 mr-1" />
-                          ) : (
-                            <PhoneIcon className="w-4 h-4 mr-1" />
-                          )}
-                          Incoming {incomingCall.type} call...
-                        </span>
-                      ) : (
-                        chat.lastMessage || 'No messages yet'
-                      )}
-                    </p>
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                        {incomingCall && incomingCall.chatId === chat.id ? (
+                          <span className="flex items-center text-blue-500 font-medium animate-pulse">
+                            {incomingCall.type === 'video' ? (
+                              <VideoCameraIcon className="w-4 h-4 mr-1" />
+                            ) : (
+                              <PhoneIcon className="w-4 h-4 mr-1" />
+                            )}
+                            Incoming {incomingCall.type} call...
+                          </span>
+                        ) : (
+                          chat.lastMessage || 'No messages yet'
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
 
         {/* Chat Messages */}
-      <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
-        {selectedChat ? (
-          <>
-            {/* Chat Header */}
-            <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
-              <div className="flex items-center space-x-3">
-                {isMobile && (
-                  <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-                    <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                    </svg>
-                  </button>
-                )}
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+        <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
+          {selectedChat ? (
+            <>
+              {/* Chat Header */}
+              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
+                <div className="flex items-center space-x-3">
+                  {isMobile && (
+                    <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                      <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                    </button>
+                  )}
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                       {selectedChatUser?.photoURL ? (
-                      <img
-                        src={selectedChatUser.photoURL}
+                        <img
+                          src={selectedChatUser.photoURL}
                           alt={selectedChatUser.displayName || 'User'}
                           className="w-full h-full rounded-full object-cover"
                         />
@@ -814,118 +1057,32 @@ const ChatPage = () => {
                 </div>
               </div>
 
+              {/* Pinned Message */}
+              {renderPinnedMessage()}
+
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-                {messages.map((message) => {
-                  const isGroupChat = chats.find(c => c.id === selectedChat)?.isGroup;
-                  const sender = chatParticipants[message.senderId];
-                  const reactions = message.reactions || {};
-                  const reactionCount = Object.values(reactions).reduce((acc, users) => acc + users.length, 0);
-                  const lastEmoji = Object.keys(reactions).pop();
-                  const isOwnMessage = message.senderId === user?.uid;
-                  
-                  return (
-                    <div
-                      key={message.id}
-                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div className="flex flex-col max-w-[85%] group">
-                        {isGroupChat && !isOwnMessage && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                            {sender?.displayName || 'Unknown User'}
-                          </p>
-                        )}
-                        <div className="relative">
-                          <div
-                            className={`rounded-lg px-4 py-2 break-words ${
-                              isOwnMessage
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-                            }`}
-                          >
-                            {renderMessageContent(message)}
-                            <p className="text-xs mt-1 opacity-70">
-                              {formatTimestamp(message.timestamp)}
-                            </p>
-                          </div>
-                          
-                          {/* Reaction Button */}
-                          {!isOwnMessage && (
-                            <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                              <EmojiPicker
-                                onSelect={(emoji) => handleReaction(message.id, emoji)}
-                                theme={isDarkMode ? Theme.DARK : Theme.LIGHT}
-                                position="bottom"
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Compact Reactions Display */}
-                        {reactionCount > 0 && (
-                          <div className="mt-1 flex justify-end">
-                            <button
-                              onClick={() => handleReactionClick(message.id, reactions)}
-                              className="px-2 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200"
-                            >
-                              {lastEmoji} {reactionCount}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {messages.map(renderMessageContent)}
                 <div ref={messagesEndRef} />
                 <audio ref={audioRef} className="hidden" />
               </div>
 
-              {/* Reactions Popup */}
-              {selectedReactions && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCloseReactions}>
-                  <div 
-                    className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 max-w-sm w-full mx-4"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-medium text-gray-900 dark:text-white">Reactions</h3>
-                      <button
-                        onClick={handleCloseReactions}
-                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                      >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {Object.entries(selectedReactions.reactions).map(([emoji, userIds]) => (
-                        <div key={emoji} className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-xl">{emoji}</span>
-                            <span className="text-sm text-gray-500 dark:text-gray-400">
-                              {userIds.length} {userIds.length === 1 ? 'reaction' : 'reactions'}
-                    </span>
-                          </div>
-                          <button
-                            onClick={() => handleReaction(selectedReactions.messageId, emoji)}
-                            className={`px-2 py-1 rounded-full text-xs ${
-                              userIds.includes(user?.uid || '')
-                                ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                            }`}
-                          >
-                            {userIds.includes(user?.uid || '') ? 'Remove' : 'Add'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Message Input */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {/* Reply Preview */}
+                {replyingToMessage && (
+                  <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-4">
+                    <div className="border-l-2 border-blue-500 pl-2 text-sm text-gray-700 dark:text-gray-300 flex-1">
+                      <p className="font-medium text-blue-600 dark:text-blue-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
+                      <p className="truncate">{replyingToMessage.text}</p>
+                    </div>
+                    <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
                 <div className="flex space-x-4">
                   <CldUploadWidget
                     uploadPreset="chat_attachments"
@@ -971,40 +1128,29 @@ const ChatPage = () => {
                       <MicrophoneIcon className="w-6 h-6" />
                     )}
                   </button>
-                <input
-                  type="text"
-                  value={newMessage}
+                  <input
+                    type="text"
+                    value={newMessage}
                     onChange={handleMessageChange}
-                  placeholder="Type a message..."
+                    placeholder="Type a message..."
                     className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!newMessage.trim()}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newMessage.trim()}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                  >
                     Send
-                </button>
-              </div>
-            </form>
-          </>
-        ) : (
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
               Select a chat to start messaging
-          </div>
-        )}
+            </div>
+          )}
         </div>
-      </div>
-
-      {/* Settings Button */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-        <button
-          onClick={() => setIsSettingsOpen(true)}
-          className="w-full flex items-center justify-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-        >
-          <Cog6ToothIcon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-          <span className="text-gray-600 dark:text-gray-400">Settings</span>
-        </button>
       </div>
 
       {/* Add CallInterface */}

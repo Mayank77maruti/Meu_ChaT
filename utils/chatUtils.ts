@@ -22,6 +22,7 @@ export interface Message {
   text: string;
   timestamp: number;
   read: boolean;
+  pinned?: boolean;
   reactions?: { [emoji: string]: string[] };
   attachment?: {
     type: 'image' | 'file' | 'voice' | 'video';
@@ -29,6 +30,11 @@ export interface Message {
     name?: string;
     size?: number;
     duration?: number;
+  };
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    text: string;
   };
 }
 
@@ -41,6 +47,16 @@ export interface Chat {
   name?: string;
   createdBy?: string;
   createdAt?: Date;
+  pinnedMessage?: string;
+  pinnedAt?: Date;
+}
+
+export interface UserProfile {
+  uid: string;
+  displayName?: string;
+  photoURL?: string;
+  online?: boolean;
+  email?: string;
 }
 
 // Create a new chat...................................
@@ -79,6 +95,8 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
         name: data.name,
         createdBy: data.createdBy,
         createdAt: data.createdAt?.toDate(),
+        pinnedMessage: data.pinnedMessage,
+        pinnedAt: data.pinnedAt?.toDate(),
       });
     });
     // Sort chats client-side
@@ -98,6 +116,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   name?: string;
   size?: number;
   duration?: number;
+}, replyToInfo?: {
+  messageId: string;
+  senderId: string;
+  text: string;
 }) => {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
@@ -112,6 +134,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
 
   if (attachment) {
     messageData.attachment = attachment;
+  }
+
+  if (replyToInfo) {
+    messageData.replyTo = replyToInfo;
   }
 
   const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
@@ -143,8 +169,10 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         senderId: data.senderId,
         timestamp: data.timestamp?.toDate().getTime() || Date.now(),
         read: data.read || false,
+        pinned: data.pinned || false,
         reactions: data.reactions || {},
-        attachment: data.attachment
+        attachment: data.attachment,
+        replyTo: data.replyTo
       });
     });
     callback(messages);
@@ -188,4 +216,161 @@ export const addReaction = async (chatId: string, messageId: string, emoji: stri
   }
 
   await updateDoc(messageRef, { reactions });
+};
+
+export const searchMessages = async (searchTerm: string): Promise<{ 
+  message: Message; 
+  chatId: string; 
+  chatName?: string; 
+  isGroup: boolean;
+  participantInfo?: UserProfile;
+}[]> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return [];
+
+  // First get all chats the user is part of
+  const chatsQuery = query(
+    collection(db, 'chats'),
+    where('participants', 'array-contains', currentUser.uid)
+  );
+  const chatsSnapshot = await getDocs(chatsQuery);
+  
+  const searchResults: { 
+    message: Message; 
+    chatId: string; 
+    chatName?: string; 
+    isGroup: boolean;
+    participantInfo?: UserProfile;
+  }[] = [];
+  
+  // Search through each chat's messages
+  for (const chatDoc of chatsSnapshot.docs) {
+    const chatData = chatDoc.data();
+    const chatId = chatDoc.id;
+    const messagesQuery = query(
+      collection(db, 'chats', chatId, 'messages'),
+      where('text', '>=', searchTerm),
+      where('text', '<=', searchTerm + '\uf8ff')
+    );
+    
+    const messagesSnapshot = await getDocs(messagesQuery);
+    
+    // If it's not a group chat, get the other participant's info
+    let participantInfo: UserProfile | undefined;
+    if (!chatData.isGroup) {
+      const otherParticipantId = chatData.participants.find((id: string) => id !== currentUser.uid);
+      if (otherParticipantId) {
+        const userDoc = await getDoc(doc(db, 'users', otherParticipantId));
+        if (userDoc.exists()) {
+          participantInfo = { uid: otherParticipantId, ...userDoc.data() } as UserProfile;
+        }
+      }
+    }
+
+    messagesSnapshot.forEach((doc) => {
+      const data = doc.data();
+      searchResults.push({
+        message: {
+          id: doc.id,
+          chatId,
+          text: data.text,
+          senderId: data.senderId,
+          timestamp: data.timestamp?.toDate().getTime() || Date.now(),
+          read: data.read || false,
+          reactions: data.reactions || {},
+          attachment: data.attachment
+        },
+        chatId,
+        chatName: chatData.isGroup ? chatData.name : participantInfo?.displayName,
+        isGroup: chatData.isGroup || false,
+        participantInfo
+      });
+    });
+  }
+  
+  // Sort results by timestamp
+  searchResults.sort((a, b) => b.message.timestamp - a.message.timestamp);
+  return searchResults;
+};
+
+export const searchGroups = async (searchTerm: string): Promise<Chat[]> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return [];
+
+  const chatsQuery = query(
+    collection(db, 'chats'),
+    where('isGroup', '==', true),
+    where('participants', 'array-contains', currentUser.uid)
+  );
+  const chatsSnapshot = await getDocs(chatsQuery);
+  const lowerSearch = searchTerm.toLowerCase();
+  const groups: Chat[] = [];
+  chatsSnapshot.forEach(docSnap => {
+    const data = docSnap.data();
+    if (data.name && data.name.toLowerCase().includes(lowerSearch)) {
+      groups.push({
+        id: docSnap.id,
+        participants: data.participants,
+        lastMessage: data.lastMessage,
+        lastMessageTime: data.lastMessageTime?.toDate(),
+        isGroup: data.isGroup || false,
+        name: data.name,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate(),
+        pinnedMessage: data.pinnedMessage,
+        pinnedAt: data.pinnedAt?.toDate(),
+      });
+    }
+  });
+  return groups;
+};
+
+export const pinMessage = async (chatId: string, messageId: string) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('No user logged in');
+
+  // First, unpin any existing pinned message
+  const chatRef = doc(db, 'chats', chatId);
+  const chatDoc = await getDoc(chatRef);
+  const chatData = chatDoc.data();
+  
+  if (chatData?.pinnedMessage) {
+    // Unpin the existing message
+    await updateDoc(doc(db, 'chats', chatId, 'messages', chatData.pinnedMessage), {
+      pinned: false
+    });
+  }
+
+  // Pin the new message
+  await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+    pinned: true
+  });
+
+  // Update the chat document with the new pinned message
+  await updateDoc(chatRef, {
+    pinnedMessage: messageId,
+    pinnedAt: serverTimestamp()
+  });
+};
+
+export const unpinMessage = async (chatId: string) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('No user logged in');
+
+  const chatRef = doc(db, 'chats', chatId);
+  const chatDoc = await getDoc(chatRef);
+  const chatData = chatDoc.data();
+
+  if (chatData?.pinnedMessage) {
+    // Unpin the message
+    await updateDoc(doc(db, 'chats', chatId, 'messages', chatData.pinnedMessage), {
+      pinned: false
+    });
+
+    // Remove pinned message reference from chat
+    await updateDoc(chatRef, {
+      pinnedMessage: null,
+      pinnedAt: null
+    });
+  }
 }; 
