@@ -970,13 +970,13 @@ const ChatPage = () => {
   return (
     <div className="flex h-screen">
       {/* Sidebar Navigation */}
-      <Sidebar />
+      <Sidebar hideMobileNav={isMobile && !!selectedChat} />
 
       {/* Main Chat Area */}
       <div className="flex-1 flex">
         {/* Chat List */}
         <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-          ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
+          ${isMobile ? (selectedChat ? 'hidden' : 'block') : 'block'} flex flex-col`}>
           <div className="p-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
@@ -1059,16 +1059,19 @@ const ChatPage = () => {
         </div>
 
         {/* Chat Messages */}
-        <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
+        <div className={`flex-1 flex flex-col ${isMobile ? (selectedChat ? 'block' : 'hidden') : 'block'} max-h-screen overflow-hidden relative`}>
           {selectedChat ? (
             <>
               {/* Chat Header */}
-              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
+              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 sticky top-0 z-10">
                 <div className="flex items-center space-x-3">
                   {isMobile && (
-                    <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <button 
+                      onClick={() => setSelectedChat(null)}
+                      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
                       <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                       </svg>
                     </button>
                   )}
@@ -1118,90 +1121,93 @@ const ChatPage = () => {
               {/* Pinned Message */}
               {renderPinnedMessage()}
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-                {messages.map(renderMessageContent)}
-                <div ref={messagesEndRef} />
-                <audio ref={audioRef} className="hidden" />
-              </div>
+              {/* Messages and Input Container */}
+              <div className="flex-1 flex flex-col justify-end overflow-hidden">
+                {/* Messages */}
+                <div className="overflow-y-auto pt-4 px-6 space-y-4 scrollbar-hide pb-4 h-[calc(100vh-8rem)]">
+                  {messages.map(renderMessageContent)}
+                  <div ref={messagesEndRef} />
+                  <audio ref={audioRef} className="hidden" />
+                </div>
 
-              {/* Message Input */}
-              <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-                {/* Reply Preview */}
-                {replyingToMessage && (
-                  <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-4">
-                    <div className="border-l-2 border-blue-500 pl-2 text-sm text-gray-700 dark:text-gray-300 flex-1">
-                      <p className="font-medium text-blue-600 dark:text-blue-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
-                      <p className="truncate">{replyingToMessage.text}</p>
+                {/* Message Input */}
+                <form onSubmit={handleSendMessage} className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky bottom-0">
+                  {/* Reply Preview */}
+                  {replyingToMessage && (
+                    <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-4">
+                      <div className="border-l-2 border-blue-500 pl-2 text-sm text-gray-700 dark:text-gray-300 flex-1">
+                        <p className="font-medium text-blue-600 dark:text-blue-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
+                        <p className="truncate">{replyingToMessage.text}</p>
+                      </div>
+                      <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
-                    <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                  )}
+                  <div className="flex space-x-4">
+                    <CldUploadWidget
+                      uploadPreset="chat_attachments"
+                      onSuccess={handleUploadSuccess}
+                      options={{
+                        resourceType: "auto",
+                        clientAllowedFormats: ["image", "video", "pdf", "audio"],
+                        maxFileSize: 10000000, // 10MB
+                        showPoweredBy: false,
+                        showSkipCropButton: true,
+                        sources: ["local", "camera", "url"],
+                        multiple: false,
+                      }}
+                    >
+                      {({ open }) => (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (currentChatRef.current) {
+                              open();
+                            }
+                          }}
+                          className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                        >
+                          <PaperClipIcon className="w-6 h-6" />
+                        </button>
+                      )}
+                    </CldUploadWidget>
+                    <button
+                      type="button"
+                      onClick={isRecording ? stopRecording : startRecording}
+                      className={`p-2 ${
+                        isRecording 
+                          ? 'text-red-500 hover:text-red-600' 
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      {isRecording ? (
+                        <StopIcon className="w-6 h-6" />
+                      ) : (
+                        <MicrophoneIcon className="w-6 h-6" />
+                      )}
+                    </button>
+                    <input
+                      type="text"
+                      value={newMessage}
+                      onChange={handleMessageChange}
+                      placeholder="Type a message..."
+                      className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newMessage.trim()}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Send
                     </button>
                   </div>
-                )}
-                <div className="flex space-x-4">
-                  <CldUploadWidget
-                    uploadPreset="chat_attachments"
-                    onSuccess={handleUploadSuccess}
-                    options={{
-                      resourceType: "auto",
-                      clientAllowedFormats: ["image", "video", "pdf", "audio"],
-                      maxFileSize: 10000000, // 10MB
-                      showPoweredBy: false,
-                      showSkipCropButton: true,
-                      sources: ["local", "camera", "url"],
-                      multiple: false,
-                    }}
-                  >
-                    {({ open }) => (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (currentChatRef.current) {
-                            open();
-                          }
-                        }}
-                        className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                      >
-                        <PaperClipIcon className="w-6 h-6" />
-                      </button>
-                    )}
-                  </CldUploadWidget>
-                  <button
-                    type="button"
-                    onClick={isRecording ? stopRecording : startRecording}
-                    className={`p-2 ${
-                      isRecording 
-                        ? 'text-red-500 hover:text-red-600' 
-                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                    }`}
-                  >
-                    {isRecording ? (
-                      <StopIcon className="w-6 h-6" />
-                    ) : (
-                      <MicrophoneIcon className="w-6 h-6" />
-                    )}
-                  </button>
-                  <input
-                    type="text"
-                    value={newMessage}
-                    onChange={handleMessageChange}
-                    placeholder="Type a message..."
-                    className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newMessage.trim()}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Send
-                  </button>
-                </div>
-              </form>
+                </form>
+              </div>
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
