@@ -31,6 +31,11 @@ export interface Message {
     size?: number;
     duration?: number;
   };
+  replyTo?: {
+    messageId: string;
+    senderId: string;
+    text: string;
+  };
 }
 
 export interface Chat {
@@ -111,6 +116,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   name?: string;
   size?: number;
   duration?: number;
+}, replyToInfo?: {
+  messageId: string;
+  senderId: string;
+  text: string;
 }) => {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error('No user logged in');
@@ -125,6 +134,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
 
   if (attachment) {
     messageData.attachment = attachment;
+  }
+
+  if (replyToInfo) {
+    messageData.replyTo = replyToInfo;
   }
 
   const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
@@ -158,7 +171,8 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         read: data.read || false,
         pinned: data.pinned || false,
         reactions: data.reactions || {},
-        attachment: data.attachment
+        attachment: data.attachment,
+        replyTo: data.replyTo
       });
     });
     callback(messages);

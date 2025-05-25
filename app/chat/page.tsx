@@ -58,6 +58,7 @@ const ChatPage = () => {
   const [messageToScroll, setMessageToScroll] = useState<string | null>(null);
   const [messageId, setMessageId] = useState<string | null>(null);
   const [isPinnedMessageDropdownOpen, setIsPinnedMessageDropdownOpen] = useState(false);
+  const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
 
   // Close pinned message dropdown when clicking outside
   useEffect(() => {
@@ -291,11 +292,24 @@ const ChatPage = () => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChat || !newMessage.trim()) return;
+    if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return; // Allow sending empty message if it's a reply
+
+    const replyToInfo = replyingToMessage ? {
+      messageId: replyingToMessage.id,
+      senderId: replyingToMessage.senderId,
+      text: replyingToMessage.text,
+    } : undefined;
+
+    // Store the reply info and message before clearing states
+    const currentReplyInfo = replyToInfo;
+    const messageToSend = newMessage.trim();
+    
+    // Clear states immediately
+    setReplyingToMessage(null);
+    setNewMessage('');
 
     try {
-      await sendMessage(selectedChat, newMessage.trim());
-      setNewMessage('');
+      await sendMessage(selectedChat, messageToSend, undefined, currentReplyInfo);
     } catch (error) {
       console.error('Error sending message:', error);
       alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -441,7 +455,7 @@ const ChatPage = () => {
             </svg>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-gray-300 truncate">
-                 {chats.find(c => c.id === selectedChat)?.isGroup ? chats.find(c => c.id === selectedChat)?.name : selectedChatUser?.displayName || 'Unknown User'}
+                {chats.find(c => c.id === selectedChat)?.isGroup ? chats.find(c => c.id === selectedChat)?.name : selectedChatUser?.displayName || 'Unknown User'}
               </p>
               <div className="text-xs text-gray-400 truncate">
                 {pinnedMessage.text || renderMediaIcon()}
@@ -470,9 +484,9 @@ const ChatPage = () => {
                     onClick={handleUnpinClick}
                     className="flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700" role="menuitem"
                   >
-                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                     </svg>
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
                     Unpin
                   </button>
                 </div>
@@ -507,47 +521,71 @@ const ChatPage = () => {
           <div className="flex items-center space-x-1.5 mb-0.5">
             {!isCurrentUser && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {message.senderId === user?.uid ? 'You' : 'Other User'}
+                {chatParticipants[message.senderId]?.displayName || 'Unknown User'}
               </span>
             )}
             <span className="text-xs text-gray-400 dark:text-gray-500">
               {new Date(message.timestamp).toLocaleTimeString()}
             </span>
           </div>
-          <div className={`rounded-lg p-1.5 text-sm ${
+          
+          <div className={`rounded-lg p-3 text-sm ${
             isCurrentUser 
               ? 'bg-blue-500 text-white' 
               : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-          }`}>
-            {message.text}
-            {message.attachment && (
-              <div className="mt-1">
-                {message.attachment.type === 'image' && (
-                  <img 
-                    src={message.attachment.url} 
-                    alt={message.attachment.name || 'Image'} 
-                    className="max-w-[250px] rounded-lg"
-                  />
-                )}
-                {message.attachment.type === 'video' && (
-                  <video 
-                    src={message.attachment.url} 
-                    controls
-                    className="max-w-[250px] rounded-lg"
-                  />
-                )}
-                {message.attachment.type === 'file' && (
-                  <div className="flex items-center space-x-1 text-xs">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
-                    <span>{message.attachment.name || 'File'}</span>
-                  </div>
-                )}
+          } min-w-[80px] min-h-[32px] flex items-center flex-col items-start`}>
+            {/* Display replied-to message preview inside the bubble */}
+            {message.replyTo && (
+              <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
+                <p className={`text-xs font-medium ${isCurrentUser ? 'text-blue-200' : 'text-green-600'} mb-0.5`}>
+                  {chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
+                </p>
+                <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
+                  {message.replyTo.text}
+                </p>
               </div>
             )}
+            <div className="w-full">
+              {message.text}
+              {message.attachment && (
+                <div className="mt-2">
+                  {message.attachment.type === 'image' && (
+                    <img 
+                      src={message.attachment.url} 
+                      alt={message.attachment.name || 'Image'} 
+                      className="max-w-[250px] rounded-lg"
+                    />
+                  )}
+                  {message.attachment.type === 'video' && (
+                    <video 
+                      src={message.attachment.url} 
+                      controls
+                      className="max-w-[250px] rounded-lg"
+                    />
+                  )}
+                  {message.attachment.type === 'file' && (
+                    <div className="flex items-center space-x-1 text-xs">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span>{message.attachment.name || 'File'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center space-x-1 mt-0.5">
+             {/* Reply Button */}
+             <button
+                onClick={() => handleReplyClick(message)}
+                className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 invisible group-hover:visible"
+                title="Reply"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l3 3m-3-3l3-3" />
+                </svg>
+              </button>
             {!message.pinned && (
               <button
                 onClick={() => handlePinMessage(message.id)}
@@ -851,6 +889,14 @@ const ChatPage = () => {
     setCallType(null);
   };
 
+  const handleReplyClick = (message: Message) => {
+    setReplyingToMessage(message);
+  };
+
+  const handleCancelReply = () => {
+    setReplyingToMessage(null);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
@@ -871,108 +917,108 @@ const ChatPage = () => {
       {/* Main Chat Area */}
       <div className="flex-1 flex">
         {/* Chat List */}
-      <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-        ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
-            <button
-              onClick={toggleDarkMode}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-              aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {isDarkMode ? (
-                <SunIcon className="h-5 w-5 text-gray-200" />
-              ) : (
-                <MoonIcon className="h-5 w-5 text-gray-600" />
-              )}
-            </button>
+        <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
+          ${isMobile ? 'hidden' : 'block'} flex flex-col`}>
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
+              <button
+                onClick={toggleDarkMode}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {isDarkMode ? (
+                  <SunIcon className="h-5 w-5 text-gray-200" />
+                ) : (
+                  <MoonIcon className="h-5 w-5 text-gray-600" />
+                )}
+              </button>
+            </div>
+            <UserSearch />
           </div>
-          <UserSearch />
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {chats.map((chat) => {
+          <div className="flex-1 overflow-y-auto">
+            {chats.map((chat) => {
               const isGroupChat = chat.isGroup;
               const otherParticipantId = !isGroupChat ? chat.participants.find(id => id !== user?.uid) : null;
               const otherParticipant = !isGroupChat ? chatParticipants[otherParticipantId || ''] : null;
               const isOnline = !isGroupChat ? onlineUsers[otherParticipantId || ''] : false;
-            
-            return (
-              <div
-                key={chat.id}
-                onClick={() => setSelectedChat(chat.id)}
-                className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
-                  selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+              
+              return (
+                <div
+                  key={chat.id}
+                  onClick={() => setSelectedChat(chat.id)}
+                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
+                    selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="relative">
+                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                         {isGroupChat ? (
                           <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
                         ) : otherParticipant?.photoURL ? (
-                        <img
-                          src={otherParticipant.photoURL}
+                          <img
+                            src={otherParticipant.photoURL}
                             alt={otherParticipant.displayName || 'User'}
                             className="w-full h-full rounded-full object-cover"
-                        />
+                          />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
                             {otherParticipant?.displayName?.[0]?.toUpperCase() || '?'}
                           </div>
+                        )}
+                      </div>
+                      {!isGroupChat && (
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                          isOnline ? 'bg-green-500' : 'bg-gray-400'
+                        }`} />
                       )}
                     </div>
-                      {!isGroupChat && (
-                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
-                      isOnline ? 'bg-green-500' : 'bg-gray-400'
-                    }`} />
-                      )}
-                  </div>
-                  <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                      {incomingCall && incomingCall.chatId === chat.id ? (
-                        <span className="flex items-center text-blue-500 font-medium animate-pulse">
-                          {incomingCall.type === 'video' ? (
-                            <VideoCameraIcon className="w-4 h-4 mr-1" />
-                          ) : (
-                            <PhoneIcon className="w-4 h-4 mr-1" />
-                          )}
-                          Incoming {incomingCall.type} call...
-                        </span>
-                      ) : (
-                        chat.lastMessage || 'No messages yet'
-                      )}
-                    </p>
+                      </p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                        {incomingCall && incomingCall.chatId === chat.id ? (
+                          <span className="flex items-center text-blue-500 font-medium animate-pulse">
+                            {incomingCall.type === 'video' ? (
+                              <VideoCameraIcon className="w-4 h-4 mr-1" />
+                            ) : (
+                              <PhoneIcon className="w-4 h-4 mr-1" />
+                            )}
+                            Incoming {incomingCall.type} call...
+                          </span>
+                        ) : (
+                          chat.lastMessage || 'No messages yet'
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
 
         {/* Chat Messages */}
-      <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
-        {selectedChat ? (
-          <>
-            {/* Chat Header */}
-            <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
-              <div className="flex items-center space-x-3">
-                {isMobile && (
-                  <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-                    <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                    </svg>
-                  </button>
-                )}
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+        <div className="flex-1 flex flex-col bg-gray-50 dark:bg-gray-900">
+          {selectedChat ? (
+            <>
+              {/* Chat Header */}
+              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4">
+                <div className="flex items-center space-x-3">
+                  {isMobile && (
+                    <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                      <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                    </button>
+                  )}
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
                       {selectedChatUser?.photoURL ? (
-                      <img
-                        src={selectedChatUser.photoURL}
+                        <img
+                          src={selectedChatUser.photoURL}
                           alt={selectedChatUser.displayName || 'User'}
                           className="w-full h-full rounded-full object-cover"
                         />
@@ -1021,52 +1067,22 @@ const ChatPage = () => {
                 <audio ref={audioRef} className="hidden" />
               </div>
 
-              {/* Reactions Popup */}
-              {selectedReactions && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCloseReactions}>
-                  <div 
-                    className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 max-w-sm w-full mx-4"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-medium text-gray-900 dark:text-white">Reactions</h3>
-                      <button
-                        onClick={handleCloseReactions}
-                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                      >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {Object.entries(selectedReactions.reactions).map(([emoji, userIds]) => (
-                        <div key={emoji} className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-xl">{emoji}</span>
-                            <span className="text-sm text-gray-500 dark:text-gray-400">
-                              {userIds.length} {userIds.length === 1 ? 'reaction' : 'reactions'}
-                    </span>
-                          </div>
-                          <button
-                            onClick={() => handleReaction(selectedReactions.messageId, emoji)}
-                            className={`px-2 py-1 rounded-full text-xs ${
-                              userIds.includes(user?.uid || '')
-                                ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                            }`}
-                          >
-                            {userIds.includes(user?.uid || '') ? 'Remove' : 'Add'}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Message Input */}
               <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                {/* Reply Preview */}
+                {replyingToMessage && (
+                  <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-4">
+                    <div className="border-l-2 border-blue-500 pl-2 text-sm text-gray-700 dark:text-gray-300 flex-1">
+                      <p className="font-medium text-blue-600 dark:text-blue-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
+                      <p className="truncate">{replyingToMessage.text}</p>
+                    </div>
+                    <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
                 <div className="flex space-x-4">
                   <CldUploadWidget
                     uploadPreset="chat_attachments"
@@ -1112,40 +1128,29 @@ const ChatPage = () => {
                       <MicrophoneIcon className="w-6 h-6" />
                     )}
                   </button>
-                <input
-                  type="text"
-                  value={newMessage}
+                  <input
+                    type="text"
+                    value={newMessage}
                     onChange={handleMessageChange}
-                  placeholder="Type a message..."
+                    placeholder="Type a message..."
                     className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!newMessage.trim()}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newMessage.trim()}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                  >
                     Send
-                </button>
-              </div>
-            </form>
-          </>
-        ) : (
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
               Select a chat to start messaging
-          </div>
-        )}
+            </div>
+          )}
         </div>
-      </div>
-
-      {/* Settings Button */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-        <button
-          onClick={() => setIsSettingsOpen(true)}
-          className="w-full flex items-center justify-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-        >
-          <Cog6ToothIcon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-          <span className="text-gray-600 dark:text-gray-400">Settings</span>
-        </button>
       </div>
 
       {/* Add CallInterface */}
