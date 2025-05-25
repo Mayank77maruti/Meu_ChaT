@@ -4,7 +4,7 @@ import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon } from '@heroicons/react/24/outline';
+import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline';
 import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction, pinMessage, unpinMessage } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
 import Settings from '../../components/Settings';
@@ -539,9 +539,9 @@ const ChatPage = () => {
       <div
         ref={messageRef}
         key={message.id}
-        className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-1.5 group`}
+        className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-1.5 group w-full`}
       >
-        <div className={`flex flex-col max-w-[60%] ${isCurrentUser ? 'items-end' : 'items-start'}`}>
+        <div className={`flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[80%] md:max-w-[70%]`}>
           <div className="flex items-center space-x-1.5 mb-0.5">
             {!isCurrentUser && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -553,7 +553,7 @@ const ChatPage = () => {
             </span>
           </div>
           
-          <div className={`flex ${isCurrentUser ? 'flex-row' : 'flex-row-reverse'} items-start gap-2`}>
+          <div className={`flex ${isCurrentUser ? 'flex-row' : 'flex-row-reverse'} items-start gap-2 w-full`}>
             {/* Emoji Reaction Button - Only show for received messages */}
             {!isCurrentUser && (
               <div className="relative invisible group-hover:visible">
@@ -565,11 +565,11 @@ const ChatPage = () => {
               </div>
             )}
 
-            <div className={`rounded-lg p-3 text-sm ${
+            <div className={`rounded-lg p-2 sm:p-3 text-sm ${
               isCurrentUser 
                 ? 'bg-blue-500 text-white' 
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-            } min-w-[80px] min-h-[32px] flex items-center flex-col items-start`}>
+            } min-w-[80px] min-h-[32px] flex items-center flex-col items-start w-full break-words`}>
               {/* Display replied-to message preview inside the bubble */}
               {message.replyTo && (
                 <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
@@ -591,14 +591,14 @@ const ChatPage = () => {
                       <img 
                         src={message.attachment.url} 
                         alt={message.attachment.name || 'Image'} 
-                        className="max-w-[250px] rounded-lg"
+                        className="max-w-full rounded-lg"
                       />
                     )}
                     {message.attachment.type === 'video' && (
                       <video 
                         src={message.attachment.url} 
                         controls
-                        className="max-w-[250px] rounded-lg"
+                        className="max-w-full rounded-lg"
                       />
                     )}
                     {message.attachment.type === 'file' && (
@@ -611,8 +611,8 @@ const ChatPage = () => {
                     )}
                   </div>
                 )}
+                {message.linkPreview && <LinkPreview preview={message.linkPreview} />}
               </div>
-              {message.linkPreview && <LinkPreview preview={message.linkPreview} />}
             </div>
           </div>
 
@@ -970,15 +970,15 @@ const ChatPage = () => {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen w-full overflow-hidden">
       {/* Sidebar Navigation */}
       <Sidebar hideMobileNav={isMobile && !!selectedChat} />
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex w-full overflow-hidden">
         {/* Chat List */}
         <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
-          ${isMobile ? (selectedChat ? 'hidden' : 'block') : 'block'} flex flex-col`}>
+          ${isMobile ? (selectedChat ? 'hidden' : 'block') : 'block'} flex flex-col overflow-hidden`}>
           <div className="p-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
@@ -1061,11 +1061,11 @@ const ChatPage = () => {
         </div>
 
         {/* Chat Messages */}
-        <div className={`flex-1 flex flex-col ${isMobile ? (selectedChat ? 'block' : 'hidden') : 'block'} max-h-screen overflow-hidden relative`}>
+        <div className={`flex-1 flex flex-col ${isMobile ? (selectedChat ? 'block' : 'hidden') : 'block'} max-h-screen overflow-hidden relative w-full`}>
           {selectedChat ? (
             <>
               {/* Chat Header */}
-              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 sticky top-0 z-10">
+              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 sticky top-0 z-10 w-full">
                 <div className="flex items-center space-x-3">
                   {isMobile && (
                     <button 
@@ -1124,19 +1124,19 @@ const ChatPage = () => {
               {renderPinnedMessage()}
 
               {/* Messages and Input Container */}
-              <div className="flex-1 flex flex-col justify-end overflow-hidden">
+              <div className="flex-1 flex flex-col justify-end overflow-hidden w-full">
                 {/* Messages */}
-                <div className="overflow-y-auto pt-4 px-6 space-y-4 scrollbar-hide pb-4 h-[calc(100vh-8rem)]">
+                <div className="overflow-y-auto pt-4 px-3 sm:px-4 space-y-4 scrollbar-hide pb-4 h-[calc(100vh-8rem)] w-full">
                   {messages.map(renderMessageContent)}
                   <div ref={messagesEndRef} />
                   <audio ref={audioRef} className="hidden" />
                 </div>
 
                 {/* Message Input */}
-                <form onSubmit={handleSendMessage} className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky bottom-0">
+                <form onSubmit={handleSendMessage} className="px-3 sm:px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky bottom-0 w-full">
                   {/* Reply Preview */}
                   {replyingToMessage && (
-                    <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-4">
+                    <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-3 sm:mx-4">
                       <div className="border-l-2 border-blue-500 pl-2 text-sm text-gray-700 dark:text-gray-300 flex-1">
                         <p className="font-medium text-blue-600 dark:text-blue-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
                         <p className="truncate">{replyingToMessage.text}</p>
@@ -1148,7 +1148,7 @@ const ChatPage = () => {
                       </button>
                     </div>
                   )}
-                  <div className="flex space-x-4">
+                  <div className="flex space-x-2 sm:space-x-4">
                     <CldUploadWidget
                       uploadPreset="chat_attachments"
                       onSuccess={handleUploadSuccess}
@@ -1203,9 +1203,9 @@ const ChatPage = () => {
                     <button
                       type="submit"
                       disabled={!newMessage.trim()}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Send
+                      <PaperAirplaneIcon className="w-5 h-5" />
                     </button>
                   </div>
                 </form>
