@@ -22,6 +22,8 @@ export interface Message {
   text: string;
   timestamp: number;
   read: boolean;
+  pinned?: boolean;
+  pinnedAt?: number;
   reactions?: { [emoji: string]: string[] };
   attachment?: {
     type: 'image' | 'file' | 'voice' | 'video';
@@ -41,6 +43,14 @@ export interface Chat {
   name?: string;
   createdBy?: string;
   createdAt?: Date;
+}
+
+export interface UserProfile {
+  uid: string;
+  displayName?: string;
+  photoURL?: string;
+  online?: boolean;
+  email?: string;
 }
 
 // Create a new chat...................................
@@ -188,4 +198,155 @@ export const addReaction = async (chatId: string, messageId: string, emoji: stri
   }
 
   await updateDoc(messageRef, { reactions });
+};
+
+export const searchMessages = async (searchTerm: string): Promise<{ 
+  message: Message; 
+  chatId: string; 
+  chatName?: string; 
+  isGroup: boolean;
+  participantInfo?: UserProfile;
+}[]> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return [];
+
+  // First get all chats the user is part of
+  const chatsQuery = query(
+    collection(db, 'chats'),
+    where('participants', 'array-contains', currentUser.uid)
+  );
+  const chatsSnapshot = await getDocs(chatsQuery);
+  
+  const searchResults: { 
+    message: Message; 
+    chatId: string; 
+    chatName?: string; 
+    isGroup: boolean;
+    participantInfo?: UserProfile;
+  }[] = [];
+  
+  // Search through each chat's messages
+  for (const chatDoc of chatsSnapshot.docs) {
+    const chatData = chatDoc.data();
+    const chatId = chatDoc.id;
+    const messagesQuery = query(
+      collection(db, 'chats', chatId, 'messages'),
+      where('text', '>=', searchTerm),
+      where('text', '<=', searchTerm + '\uf8ff')
+    );
+    
+    const messagesSnapshot = await getDocs(messagesQuery);
+    
+    // If it's not a group chat, get the other participant's info
+    let participantInfo: UserProfile | undefined;
+    if (!chatData.isGroup) {
+      const otherParticipantId = chatData.participants.find((id: string) => id !== currentUser.uid);
+      if (otherParticipantId) {
+        const userDoc = await getDoc(doc(db, 'users', otherParticipantId));
+        if (userDoc.exists()) {
+          participantInfo = { uid: otherParticipantId, ...userDoc.data() } as UserProfile;
+        }
+      }
+    }
+
+    messagesSnapshot.forEach((doc) => {
+      const data = doc.data();
+      searchResults.push({
+        message: {
+          id: doc.id,
+          chatId,
+          text: data.text,
+          senderId: data.senderId,
+          timestamp: data.timestamp?.toDate().getTime() || Date.now(),
+          read: data.read || false,
+          reactions: data.reactions || {},
+          attachment: data.attachment
+        },
+        chatId,
+        chatName: chatData.isGroup ? chatData.name : participantInfo?.displayName,
+        isGroup: chatData.isGroup || false,
+        participantInfo
+      });
+    });
+  }
+  
+  // Sort results by timestamp
+  searchResults.sort((a, b) => b.message.timestamp - a.message.timestamp);
+  return searchResults;
+};
+
+export const searchGroups = async (searchTerm: string): Promise<Chat[]> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return [];
+
+  const chatsQuery = query(
+    collection(db, 'chats'),
+    where('isGroup', '==', true),
+    where('participants', 'array-contains', currentUser.uid)
+  );
+  const chatsSnapshot = await getDocs(chatsQuery);
+  const lowerSearch = searchTerm.toLowerCase();
+  const groups: Chat[] = [];
+  chatsSnapshot.forEach(docSnap => {
+    const data = docSnap.data();
+    if (data.name && data.name.toLowerCase().includes(lowerSearch)) {
+      groups.push({
+        id: docSnap.id,
+        participants: data.participants,
+        lastMessage: data.lastMessage,
+        lastMessageTime: data.lastMessageTime?.toDate(),
+        isGroup: data.isGroup || false,
+        name: data.name,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate(),
+      });
+    }
+  });
+  return groups;
+};
+
+// Pin/Unpin message
+export const togglePinMessage = async (chatId: string, messageId: string) => {
+  const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+  const messageDoc = await getDoc(messageRef);
+  
+  if (!messageDoc.exists()) return;
+
+  const message = messageDoc.data();
+  const isPinned = message.pinned || false;
+
+  await updateDoc(messageRef, {
+    pinned: !isPinned,
+    pinnedAt: !isPinned ? Date.now() : null
+  });
+};
+
+// Get pinned messages for a chat
+export const getPinnedMessages = (chatId: string, callback: (messages: Message[]) => void) => {
+  const messagesRef = collection(db, 'chats', chatId, 'messages');
+  const q = query(
+    messagesRef,
+    where('pinned', '==', true),
+    orderBy('pinnedAt', 'desc')
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const messages: Message[] = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      messages.push({
+        id: doc.id,
+        chatId,
+        text: data.text,
+        senderId: data.senderId,
+        timestamp: data.timestamp?.toDate().getTime() || Date.now(),
+        read: data.read || false,
+        pinned: data.pinned || false,
+        pinnedAt: data.pinnedAt,
+        reactions: data.reactions || {},
+        attachment: data.attachment
+      });
+    });
+    callback(messages);
+  });
 }; 

@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { auth, db } from '../../firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { SunIcon, MoonIcon, Cog6ToothIcon, UserGroupIcon, PaperClipIcon, MicrophoneIcon, StopIcon, PlayIcon, PauseIcon, PhoneIcon, VideoCameraIcon } from '@heroicons/react/24/outline';
 import { Chat, Message, getChats, getMessages, sendMessage, getUserProfile, addReaction } from '../../utils/chatUtils';
 import UserSearch from '../../components/UserSearch';
@@ -32,6 +32,7 @@ const ChatPage = () => {
   const [chatParticipants, setChatParticipants] = useState<{[key: string]: any}>({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
   const [onlineUsers, setOnlineUsers] = useState<{[key: string]: boolean}>({});
   const [selectedChatUser, setSelectedChatUser] = useState<UserProfile | null>(null);
   const [selectedReactions, setSelectedReactions] = useState<{messageId: string, reactions: {[emoji: string]: string[]}} | null>(null);
@@ -54,6 +55,7 @@ const ChatPage = () => {
     type: 'audio' | 'video';
     chatId: string;
   } | null>(null);
+  const [messageToScroll, setMessageToScroll] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -115,9 +117,15 @@ const ChatPage = () => {
   }, [user]);
 
   useEffect(() => {
+    const chatId = searchParams.get('chatId');
+    if (chatId !== selectedChat) {
+      setSelectedChat(chatId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!selectedChat) return;
 
-    // Subscribe to messages
     const unsubscribeMessages = getMessages(selectedChat, (updatedMessages) => {
       setMessages(updatedMessages);
       scrollToBottom();
@@ -127,6 +135,34 @@ const ChatPage = () => {
       unsubscribeMessages();
     };
   }, [selectedChat]);
+
+  // Separate effect for message scrolling
+  useEffect(() => {
+    const messageId = searchParams.get('messageId');
+    if (messageId && selectedChat && messages.length > 0) {
+      // Wait for messages to be loaded and rendered
+      const scrollToMessage = () => {
+        const messageElement = messageRefs.current[messageId];
+        if (messageElement) {
+          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          messageElement.classList.add('bg-blue-50', 'dark:bg-blue-900');
+          setTimeout(() => {
+            messageElement.classList.remove('bg-blue-50', 'dark:bg-blue-900');
+            // Clear messageId from URL
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('messageId');
+            window.history.replaceState({}, '', newUrl.toString());
+          }, 2000);
+        } else {
+          // If message element is not found, try again after a short delay
+          setTimeout(scrollToMessage, 100);
+        }
+      };
+
+      // Start the scrolling process
+      scrollToMessage();
+    }
+  }, [searchParams, selectedChat, messages]);
 
   useEffect(() => {
     if (!user) return;
@@ -262,6 +298,12 @@ const ChatPage = () => {
   const handleCloseReactions = () => {
     setSelectedReactions(null);
   };
+
+  const setMessageRef = useCallback((messageId: string) => (el: HTMLDivElement | null) => {
+    if (el) {
+      messageRefs.current[messageId] = el;
+    }
+  }, []);
 
   const renderMessageContent = (message: Message) => {
     if (message.attachment) {
@@ -827,7 +869,8 @@ const ChatPage = () => {
                   return (
                     <div
                       key={message.id}
-                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
+                      ref={setMessageRef(message.id)}
+                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} mb-4`}
                     >
                       <div className="flex flex-col max-w-[85%] group">
                         {isGroupChat && !isOwnMessage && (
