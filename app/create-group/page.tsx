@@ -14,6 +14,7 @@ export default function CreateGroup() {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -40,6 +41,8 @@ export default function CreateGroup() {
     e.preventDefault();
     if (!groupName.trim() || selectedUsers.length === 0) return;
 
+    setIsCreatingGroup(true);
+
     try {
       const groupData = {
         name: groupName.trim(),
@@ -53,6 +56,8 @@ export default function CreateGroup() {
       router.push(`/chat?chatId=${docRef.id}`);
     } catch (error) {
       console.error('Error creating group:', error);
+    } finally {
+      setIsCreatingGroup(false);
     }
   };
 
@@ -68,10 +73,10 @@ export default function CreateGroup() {
     user.displayName?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  if (loading) {
+  if (loading || isCreatingGroup) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-violet-500"></div>
       </div>
     );
   }
@@ -83,7 +88,7 @@ export default function CreateGroup() {
         
         <form onSubmit={handleCreateGroup} className="space-y-6">
           <div>
-            <label htmlFor="groupName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label htmlFor="groupName" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Group Name
             </label>
             <input
@@ -91,14 +96,14 @@ export default function CreateGroup() {
               id="groupName"
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
               placeholder="Enter group name"
               required
             />
           </div>
 
           <div>
-            <label htmlFor="search" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            <label htmlFor="search" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Search Users
             </label>
             <input
@@ -106,13 +111,13 @@ export default function CreateGroup() {
               id="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm"
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
               placeholder="Search users..."
             />
           </div>
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <div className="space-y-2 py-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Select Members
             </label>
             <div className="max-h-60 overflow-y-auto space-y-2">
@@ -122,7 +127,7 @@ export default function CreateGroup() {
                   onClick={() => toggleUserSelection(user.uid)}
                   className={`flex items-center space-x-3 p-2 rounded-md cursor-pointer ${
                     selectedUsers.includes(user.uid)
-                      ? 'bg-blue-100 dark:bg-blue-900'
+                      ? 'bg-violet-100 dark:bg-violet-900'
                       : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                   }`}
                 >
@@ -147,7 +152,7 @@ export default function CreateGroup() {
                   </div>
                   {selectedUsers.includes(user.uid) && (
                     <div className="flex-shrink-0">
-                      <svg className="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+                      <svg className="h-5 w-5 text-violet-500" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                       </svg>
                     </div>
@@ -157,20 +162,20 @@ export default function CreateGroup() {
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3">
+          <div className="flex justify-end space-x-3 pt-6">
             <button
               type="button"
               onClick={() => router.back()}
-              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={!groupName.trim() || selectedUsers.length === 0}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!groupName.trim() || selectedUsers.length === 0 || isCreatingGroup}
+              className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-violet-600 to-purple-600 border border-transparent rounded-md hover:from-violet-500 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Create Group
+              {isCreatingGroup ? 'Creating...' : 'Create Group'}
             </button>
           </div>
         </form>

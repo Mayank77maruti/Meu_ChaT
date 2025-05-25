@@ -190,9 +190,9 @@ const ChatPage = () => {
         const messageElement = messageRefs.current[messageId];
         if (messageElement) {
           messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          messageElement.classList.add('bg-blue-50', 'dark:bg-blue-900');
+          messageElement.classList.add('bg-violet-50', 'dark:bg-violet-900');
           setTimeout(() => {
-            messageElement.classList.remove('bg-blue-50', 'dark:bg-blue-900');
+            messageElement.classList.remove('bg-violet-50', 'dark:bg-violet-900');
             // Clear messageId from URL
             const newUrl = new URL(window.location.href);
             newUrl.searchParams.delete('messageId');
@@ -404,9 +404,9 @@ const ChatPage = () => {
       const messageElement = messageRefs.current[pinnedMessage.id];
       if (messageElement) {
         messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        messageElement.classList.add('bg-blue-50', 'dark:bg-blue-900');
+        messageElement.classList.add('bg-violet-50', 'dark:bg-violet-900');
         setTimeout(() => {
-          messageElement.classList.remove('bg-blue-50', 'dark:bg-blue-900');
+          messageElement.classList.remove('bg-violet-50', 'dark:bg-violet-900');
         }, 2000);
       }
     };
@@ -567,18 +567,18 @@ const ChatPage = () => {
 
             <div className={`rounded-lg p-2 sm:p-3 text-sm ${
               isCurrentUser 
-                ? 'bg-blue-500 text-white' 
+                ? 'bg-violet-600 text-white' 
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
             } min-w-[80px] min-h-[32px] flex items-center flex-col items-start w-full break-words`}>
               {/* Display replied-to message preview inside the bubble */}
               {message.replyTo && (
-                <div className={`border-l-2 ${isCurrentUser ? 'border-blue-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
-                  <p className={`text-xs font-medium ${isCurrentUser ? 'text-blue-200' : 'text-green-600'} mb-0.5`}>
+                <div className={`border-l-2 ${isCurrentUser ? 'border-violet-300' : 'border-green-500'} pl-2 pb-2 mb-2 w-full`}>
+                  <p className={`text-xs font-medium ${isCurrentUser ? 'text-violet-200' : 'text-green-600'} mb-0.5`}>
                     {message.replyTo.senderId === user?.uid 
                       ? user.displayName || 'You'
                       : chatParticipants[message.replyTo.senderId]?.displayName || 'Unknown User'}
                   </p>
-                  <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
+                  <p className={`text-xs ${isCurrentUser ? 'text-violet-100' : 'text-gray-600 dark:text-gray-400'} truncate`}>
                     {message.replyTo.text}
                   </p>
                 </div>
@@ -625,7 +625,7 @@ const ChatPage = () => {
                   onClick={() => handleReactionClick(message.id, message.reactions!)}
                   className={`text-xs px-1.5 py-0.5 rounded-full ${
                     userIds.includes(user?.uid || '')
-                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
+                      ? 'bg-violet-100 dark:bg-violet-900 text-violet-600 dark:text-violet-300'
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                   }`}
                 >
@@ -970,27 +970,27 @@ const ChatPage = () => {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-gray-900 via-gray-800 to-purple-900">
       {/* Sidebar Navigation */}
       <Sidebar hideMobileNav={isMobile && !!selectedChat} />
 
       {/* Main Chat Area */}
       <div className="flex-1 flex w-full overflow-hidden">
         {/* Chat List */}
-        <div className={`w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 
+        <div className={`w-80 bg-white/5 backdrop-blur-lg border-r border-white/10 
           ${isMobile ? (selectedChat ? 'hidden' : 'block') : 'block'} flex flex-col overflow-hidden`}>
-          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="p-4 border-b border-white/10">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-white">MeuChat</h2>
+              <h2 className="text-xl font-semibold bg-gradient-to-r from-violet-400 to-purple-400 bg-clip-text text-transparent">MeuChat</h2>
               <button
                 onClick={toggleDarkMode}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                className="p-2 rounded-lg hover:bg-white/5 transition-colors duration-200"
                 aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
               >
                 {isDarkMode ? (
-                  <SunIcon className="h-5 w-5 text-gray-200" />
+                  <SunIcon className="h-5 w-5 text-violet-400" />
                 ) : (
-                  <MoonIcon className="h-5 w-5 text-gray-600" />
+                  <MoonIcon className="h-5 w-5 text-violet-400" />
                 )}
               </button>
             </div>
@@ -1007,15 +1007,15 @@ const ChatPage = () => {
                 <div
                   key={chat.id}
                   onClick={() => setSelectedChat(chat.id)}
-                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${
-                    selectedChat === chat.id ? 'bg-gray-100 dark:bg-gray-700' : ''
+                  className={`p-4 hover:bg-white/5 cursor-pointer transition-all duration-200 ${
+                    selectedChat === chat.id ? 'bg-white/10' : ''
                   }`}
                 >
                   <div className="flex items-center space-x-3">
                     <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-600/30 to-purple-600/30 border border-white/10">
                         {isGroupChat ? (
-                          <UserGroupIcon className="w-10 h-10 p-2 text-gray-500 dark:text-gray-400" />
+                          <UserGroupIcon className="w-10 h-10 p-2 text-violet-400" />
                         ) : otherParticipant?.photoURL ? (
                           <img
                             src={otherParticipant.photoURL}
@@ -1023,24 +1023,24 @@ const ChatPage = () => {
                             className="w-full h-full rounded-full object-cover"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                          <div className="w-full h-full flex items-center justify-center text-lg text-violet-400">
                             {otherParticipant?.displayName?.[0]?.toUpperCase() || '?'}
                           </div>
                         )}
                       </div>
                       {!isGroupChat && (
-                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 ${
+                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-900 ${
                           isOnline ? 'bg-green-500' : 'bg-gray-400'
                         }`} />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      <p className="text-sm font-medium text-white truncate">
                         {isGroupChat ? chat.name : otherParticipant?.displayName || 'Unknown User'}
                       </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                      <p className="text-sm text-gray-400 truncate">
                         {incomingCall && incomingCall.chatId === chat.id ? (
-                          <span className="flex items-center text-blue-500 font-medium animate-pulse">
+                          <span className="flex items-center text-violet-400 font-medium animate-pulse">
                             {incomingCall.type === 'video' ? (
                               <VideoCameraIcon className="w-4 h-4 mr-1" />
                             ) : (
@@ -1065,20 +1065,20 @@ const ChatPage = () => {
           {selectedChat ? (
             <>
               {/* Chat Header */}
-              <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 sticky top-0 z-10 w-full">
+              <div className="h-16 bg-white/5 backdrop-blur-lg border-b border-white/10 flex items-center justify-between px-4 sticky top-0 z-10 w-full">
                 <div className="flex items-center space-x-3">
                   {isMobile && (
                     <button 
                       onClick={() => setSelectedChat(null)}
-                      className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                      className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
                     >
-                      <svg className="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                       </svg>
                     </button>
                   )}
                   <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-600/30 to-purple-600/30 border border-white/10">
                       {selectedChatUser?.photoURL ? (
                         <img
                           src={selectedChatUser.photoURL}
@@ -1086,20 +1086,20 @@ const ChatPage = () => {
                           className="w-full h-full rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-lg text-gray-500 dark:text-gray-400">
+                        <div className="w-full h-full flex items-center justify-center text-lg text-violet-400">
                           {selectedChatUser?.displayName?.[0]?.toUpperCase() || '?'}
                         </div>
                       )}
                     </div>
                     {selectedChatUser && selectedChatUser.online && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
                     )}
                   </div>
                   <div>
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-medium text-white">
                       {selectedChatUser ? selectedChatUser.displayName : chats.find(c => c.id === selectedChat)?.name || 'Chat'}
                     </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-violet-300">
                       {getTypingText() || (selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat')}
                     </p>
                   </div>
@@ -1107,15 +1107,15 @@ const ChatPage = () => {
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => handleStartCall('audio')}
-                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                    className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
                   >
-                    <PhoneIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                    <PhoneIcon className="w-5 h-5" />
                   </button>
                   <button
                     onClick={() => handleStartCall('video')}
-                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                    className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
                   >
-                    <VideoCameraIcon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                    <VideoCameraIcon className="w-5 h-5" />
                   </button>
                 </div>
               </div>
@@ -1126,22 +1126,22 @@ const ChatPage = () => {
               {/* Messages and Input Container */}
               <div className="flex-1 flex flex-col justify-end overflow-hidden w-full">
                 {/* Messages */}
-                <div className="overflow-y-auto pt-4 px-3 sm:px-4 space-y-4 scrollbar-hide pb-4 h-[calc(100vh-8rem)] w-full">
+                <div className="overflow-y-auto pt-4 px-3 sm:px-4 space-y-4 scrollbar-hide pb-4 md:pb-4 pb-20 h-[calc(100vh-8rem)] w-full">
                   {messages.map(renderMessageContent)}
                   <div ref={messagesEndRef} />
                   <audio ref={audioRef} className="hidden" />
                 </div>
 
                 {/* Message Input */}
-                <form onSubmit={handleSendMessage} className="px-3 sm:px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky bottom-0 w-full">
+                <form onSubmit={handleSendMessage} className="px-3 sm:px-4 py-3 border-t border-white/10 bg-white/5 backdrop-blur-lg sticky bottom-0 w-full">
                   {/* Reply Preview */}
                   {replyingToMessage && (
-                    <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700 p-2 rounded-t-lg border-b border-gray-200 dark:border-gray-600 -mt-4 mx-3 sm:mx-4">
-                      <div className="border-l-2 border-blue-500 pl-2 text-sm text-gray-700 dark:text-gray-300 flex-1">
-                        <p className="font-medium text-blue-600 dark:text-blue-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
+                    <div className="flex items-center justify-between bg-white/5 p-2 rounded-t-lg border-b border-white/10 -mt-4 mx-3 sm:mx-4">
+                      <div className="border-l-2 border-violet-500 pl-2 text-sm text-violet-300 flex-1">
+                        <p className="font-medium text-violet-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
                         <p className="truncate">{replyingToMessage.text}</p>
                       </div>
-                      <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400">
+                      <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-white/5 text-violet-400">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -1172,7 +1172,7 @@ const ChatPage = () => {
                               open();
                             }
                           }}
-                          className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                          className="p-2 text-violet-400 hover:text-violet-300"
                         >
                           <PaperClipIcon className="w-6 h-6" />
                         </button>
@@ -1183,8 +1183,8 @@ const ChatPage = () => {
                       onClick={isRecording ? stopRecording : startRecording}
                       className={`p-2 ${
                         isRecording 
-                          ? 'text-red-500 hover:text-red-600' 
-                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                          ? 'text-red-400 hover:text-red-300' 
+                          : 'text-violet-400 hover:text-violet-300'
                       }`}
                     >
                       {isRecording ? (
@@ -1198,12 +1198,12 @@ const ChatPage = () => {
                       value={newMessage}
                       onChange={handleMessageChange}
                       placeholder="Type a message..."
-                      className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 rounded-lg border border-white/10 bg-white/5 text-white placeholder-gray-400 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
                     />
                     <button
                       type="submit"
                       disabled={!newMessage.trim()}
-                      className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="p-2 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-lg hover:from-violet-500 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <PaperAirplaneIcon className="w-5 h-5" />
                     </button>
@@ -1212,7 +1212,7 @@ const ChatPage = () => {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400">
+            <div className="flex-1 flex items-center justify-center text-violet-300">
               Select a chat to start messaging
             </div>
           )}
