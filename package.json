@@ -11,6 +11,7 @@
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@types/simple-peer": "^9.11.8",
+    "@zegocloud/zego-uikit-prebuilt": "^2.14.3-beta",
     "cloudinary": "^2.6.1",
     "crypto-js": "^4.2.0",
     "emoji-picker-react": "^4.12.2",
