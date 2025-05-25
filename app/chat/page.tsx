@@ -18,6 +18,7 @@ import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp,
 import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
 import CallInterface from '../../components/CallInterface';
 import CallNotification from '../../components/CallNotification';
+import { LinkPreview } from '../../components/LinkPreview';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -611,6 +612,7 @@ const ChatPage = () => {
                   </div>
                 )}
               </div>
+              {message.linkPreview && <LinkPreview preview={message.linkPreview} />}
             </div>
           </div>
 
