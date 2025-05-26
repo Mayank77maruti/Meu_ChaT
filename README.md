@@ -138,7 +138,7 @@ Sure! Here's a clean and professional version of your **Features** section for y
 
 ## Architecture Diagram
 
-![image](https://github.com/user-attachments/assets/d8ea5a94-8ea5-4291-8b7a-75d9524cb5d4)
+![diagram-export-5-26-2025-3_41_05-PM](https://github.com/user-attachments/assets/34181da0-fb8a-4692-a901-4f7c293a3ae3)
 
 
 ---
