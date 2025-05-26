@@ -171,6 +171,7 @@ Sure! Here's a clean and professional version of your **Features** section for y
     PORT=3001
     ZEGO_YOUR_SERVER_SECRET=xxx
     ZEGO_APPID=xxx
+    NEXT_PUBLIC_OPENROUTER_API_KEY=xxx
    ```
 
 3. **Install dependencies**
