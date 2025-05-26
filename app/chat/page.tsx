@@ -19,6 +19,7 @@ import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
 import CallInterface from '../../components/CallInterface';
 import CallNotification from '../../components/CallNotification';
 import { LinkPreview } from '../../components/LinkPreview';
+import { sendEmailNotification } from '../../utils/emailApi';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -314,24 +315,46 @@ const ChatPage = () => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return; // Allow sending empty message if it's a reply
+    if (!selectedChat || !newMessage.trim() || !user) return;
 
-    const replyToInfo = replyingToMessage ? {
-      messageId: replyingToMessage.id,
-      senderId: replyingToMessage.senderId,
-      text: replyingToMessage.text,
-    } : undefined;
-
-    // Store the reply info and message before clearing states
-    const currentReplyInfo = replyToInfo;
+    // Store the message before clearing it
     const messageToSend = newMessage.trim();
-    
-    // Clear states immediately
-    setReplyingToMessage(null);
     setNewMessage('');
-
     try {
-      await sendMessage(selectedChat, messageToSend, undefined, currentReplyInfo);
+      // First send the chat message
+      await sendMessage(selectedChat, messageToSend);
+
+      // Get the recipient's info for email notification
+      const currentChat = chats.find(c => c.id === selectedChat);
+      if (!currentChat || currentChat.isGroup) {
+        // Skip email for group chats or if chat not found
+        return;
+      }
+
+      const otherParticipantId = currentChat.participants.find(id => id !== user.uid);
+      if (!otherParticipantId) {
+        return;
+      }
+
+      const recipientProfile = chatParticipants[otherParticipantId];
+      if (!recipientProfile?.email) {
+        console.log('Recipient email not found, skipping email notification');
+        return;
+      }
+
+      // Send email notification
+      try {
+        await sendEmailNotification(
+          user.email || 'sender@example.com', // Sender's email
+          recipientProfile.email, // Recipient's email
+          messageToSend // Use stored message content
+        );
+        console.log('Email notification sent successfully');
+      } catch (emailError) {
+        console.error('Email notification failed:', emailError);
+        // You might want to show a toast notification here
+        // "Message sent, but email notification failed"
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -730,14 +753,14 @@ const ChatPage = () => {
               <div className="w-full" dangerouslySetInnerHTML={{ __html: processMessageText(message.text) }} />
               {message.attachment && (
                 <div className="mt-2">
-                  {message.attachment.type === 'image' && (
+                  {message.attachment.type === 'image' && message.attachment.url && (
                     <img 
                       src={message.attachment.url} 
                       alt={message.attachment.name || 'Image'} 
                       className="max-w-full rounded-lg"
                     />
                   )}
-                  {message.attachment.type === 'video' && (
+                  {message.attachment.type === 'video' && message.attachment.url && (
                     <video 
                       src={message.attachment.url} 
                       controls
@@ -750,6 +773,34 @@ const ChatPage = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                       </svg>
                       <span>{message.attachment.name || 'File'}</span>
+                    </div>
+                  )}
+                  {message.attachment.type === 'voice' && message.attachment.url && (
+                    <div className="flex items-center space-x-2 bg-white/5 p-2 rounded-lg">
+                      <button
+                        onClick={() => handlePlayAudio(message.attachment!.url)}
+                        className="p-2 rounded-full hover:bg-white/10 text-violet-400"
+                      >
+                        {playingAudio === message.attachment!.url ? (
+                          <PauseIcon className="w-5 h-5" />
+                        ) : (
+                          <PlayIcon className="w-5 h-5" />
+                        )}
+                      </button>
+                      <div className="flex-1">
+                        <div className="h-1 bg-white/10 rounded-full">
+                          <div 
+                            className="h-full bg-violet-500 rounded-full transition-all duration-200"
+                            style={{ 
+                              width: playingAudio === message.attachment!.url ? '100%' : '0%',
+                              transition: 'width 0.1s linear'
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        {message.attachment.duration ? `${Math.round(message.attachment.duration)}s` : ''}
+                      </span>
                     </div>
                   )}
                 </div>
