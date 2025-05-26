@@ -1,6 +1,6 @@
 # Meu Chat – Real-Time Fullstack Chat Application
 
-A full-featured, real-time chat application built for **Flipr Hackathon 27**. Designed with scalability, modern UI/UX, and real-time collaboration in mind.
+Meu Chat is a full-featured, real-time chat application developed for Flipr Hackathon 27. It is designed with scalability, modular architecture, real-time performance, and a clean user experience in mind. The application supports user authentication, direct and group messaging, media sharing, and various real-time indicators.
 
 ---
 
