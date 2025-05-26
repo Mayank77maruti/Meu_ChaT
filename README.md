@@ -136,8 +136,8 @@ Sure! Here's a clean and professional version of your **Features** section for y
   * `Chat`: group vs private, participants
 * **Socket Events**: join, message, typing, delivery, status
 
-![Architecture Diagram](![image](https://github.com/user-attachments/assets/092c03b8-8599-411f-b40f-0b1474a10881)
-)
+## Architecture Diagram
+
 ![image](https://github.com/user-attachments/assets/d8ea5a94-8ea5-4291-8b7a-75d9524cb5d4)
 
 
