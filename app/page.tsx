@@ -7,7 +7,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useRouter } from 'next/navigation';
 import Link from "next/link";
-
+ 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const router = useRouter();
