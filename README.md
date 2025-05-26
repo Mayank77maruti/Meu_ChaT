@@ -35,29 +35,19 @@ Meu Chat is a full-featured, real-time chat application developed for Flipr Hack
 
 ## ✨ Features
 
-### Day 1: Foundation & Basic Chat
 
 *  **User Authentication**: Register, Login, Logout
 *  **User Profiles** with avatar customization
 *  **JWT-Based Session Management**
 *  **Password Recovery**
 *  **Chat Interface**: Threaded chat, timestamps, and read receipts
-
-### Day 2: Real-Time Enhancements
-
 *  **Typing indicators**, **online/offline status**
 *  **Delivery status**, **reactions** (emojis)
 *  **Group and Direct Chats**
-
-### Media & Rich Messaging
-
 *  Image previews
 *  File attachments
 *  Link previews
 *  Voice message support
-
-### Day 3: Polish & UX Features
-
 *  **Search messages**, **chat history**
 *  Pin important messages
 *  Real-time and Email Notifications
