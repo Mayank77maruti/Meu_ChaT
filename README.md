@@ -45,6 +45,7 @@ Sure! Here's a clean and professional version of your **Features** section for y
 * **User Profiles** with avatar customization
 * **JWT-Based Session Management**
 * **Password Recovery**
+* **End-to-End Encryption (E2EE)**
 * **Chat Interface**: Threaded chat, timestamps
 * **Typing indicators**
 * **Online/Offline status**
@@ -74,8 +75,6 @@ Sure! Here's a clean and professional version of your **Features** section for y
 * **Chat bots/integrations**
 
 ---
-
-## Tech Stack
 
 ## Tech Stack
 
@@ -137,7 +136,10 @@ Sure! Here's a clean and professional version of your **Features** section for y
   * `Chat`: group vs private, participants
 * **Socket Events**: join, message, typing, delivery, status
 
-![Architecture Diagram](https://your-architecture-image-link-if-any)
+![Architecture Diagram](![image](https://github.com/user-attachments/assets/092c03b8-8599-411f-b40f-0b1474a10881)
+)
+![image](https://github.com/user-attachments/assets/d8ea5a94-8ea5-4291-8b7a-75d9524cb5d4)
+
 
 ---
 
