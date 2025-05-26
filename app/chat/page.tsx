@@ -19,6 +19,7 @@ import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
 import CallInterface from '../../components/CallInterface';
 import CallNotification from '../../components/CallNotification';
 import { LinkPreview } from '../../components/LinkPreview';
+import { sendEmailNotification } from '../../utils/emailApi';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -314,26 +315,76 @@ const ChatPage = () => {
     localStorage.setItem('darkMode', newMode.toString());
   };
 
+  // const handleSendMessage = async (e: React.FormEvent) => {
+  //   e.preventDefault();
+  //   if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return; // Allow sending empty message if it's a reply
+
+  //   const replyToInfo = replyingToMessage ? {
+  //     messageId: replyingToMessage.id,
+  //     senderId: replyingToMessage.senderId,
+  //     text: replyingToMessage.text,
+  //   } : undefined;
+
+  //   // Store the reply info and message before clearing states
+  //   const currentReplyInfo = replyToInfo;
+  //   const messageToSend = newMessage.trim();
+    
+  //   // Clear states immediately
+  //   setReplyingToMessage(null);
+  //   setNewMessage('');
+
+  //   try {
+  //     await sendMessage(selectedChat, messageToSend, undefined, currentReplyInfo);
+  //   } catch (error) {
+  //     console.error('Error sending message:', error);
+  //     alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  //   }
+  // };
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return; // Allow sending empty message if it's a reply
-
-    const replyToInfo = replyingToMessage ? {
-      messageId: replyingToMessage.id,
-      senderId: replyingToMessage.senderId,
-      text: replyingToMessage.text,
-    } : undefined;
-
-    // Store the reply info and message before clearing states
-    const currentReplyInfo = replyToInfo;
+    if (!selectedChat || !newMessage.trim() || !user) return;
+  
+    // Store the message before clearing it
     const messageToSend = newMessage.trim();
     
-    // Clear states immediately
-    setReplyingToMessage(null);
+    // Clear message immediately (like in your original code)
     setNewMessage('');
-
+  
     try {
-      await sendMessage(selectedChat, messageToSend, undefined, currentReplyInfo);
+      // First send the chat message
+      await sendMessage(selectedChat, messageToSend);
+  
+      // Get the recipient's info for email notification
+      const currentChat = chats.find(c => c.id === selectedChat);
+      if (!currentChat || currentChat.isGroup) {
+        // Skip email for group chats or if chat not found
+        return;
+      }
+  
+      const otherParticipantId = currentChat.participants.find(id => id !== user.uid);
+      if (!otherParticipantId) {
+        return;
+      }
+  
+      const recipientProfile = chatParticipants[otherParticipantId];
+      if (!recipientProfile?.email) {
+        console.log('Recipient email not found, skipping email notification');
+        return;
+      }
+  
+      // Send email notification
+      try {
+        await sendEmailNotification(
+          user.email || 'sender@example.com', // Sender's email
+          recipientProfile.email, // Recipient's email
+          messageToSend // Use stored message content
+        );
+        console.log('Email notification sent successfully');
+      } catch (emailError) {
+        console.error('Email notification failed:', emailError);
+        // You might want to show a toast notification here
+        // "Message sent, but email notification failed"
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
