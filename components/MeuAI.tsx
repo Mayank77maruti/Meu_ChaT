@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -18,6 +18,7 @@ export default function MeuAI() {
   });
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Save messages to local storage whenever they change
   useEffect(() => {
@@ -25,6 +26,15 @@ export default function MeuAI() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
     }
   }, [messages]);
+
+  // Scroll to bottom when new messages are added
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,63 +99,73 @@ export default function MeuAI() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length > 0 && (
-          <div className="flex justify-end mb-4">
-            <button
-              onClick={clearChat}
-              className="px-3 py-1 text-sm text-gray-400 hover:text-gray-200 bg-white/5 rounded-lg transition-colors duration-200"
-            >
-              Clear Chat
-            </button>
-          </div>
-        )}
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[80%] rounded-lg p-3 ${
-                message.role === 'user'
-                  ? 'bg-violet-600 text-white'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
-              }`}
-            >
-              {message.content}
+      <div className="flex-1 flex flex-col justify-end overflow-hidden w-full">
+        {/* Messages */}
+        <div className="overflow-y-auto px-3 sm:px-4 space-y-4 scrollbar-hide pb-4 md:pb-4 pb-20 h-[calc(100vh-8rem)] w-full">
+          {messages.length > 0 && (
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={clearChat}
+                className="px-3 py-1 text-sm text-gray-400 hover:text-gray-200 bg-white/5 rounded-lg transition-colors duration-200"
+              >
+                Clear Chat
+              </button>
             </div>
-          </div>
-        ))}
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-3 text-gray-900 dark:text-white">
-              <div className="flex space-x-2">
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+          )}
+          {messages.map((message, index) => (
+            <div
+              key={index}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-1.5 group w-full`}
+            >
+              <div className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[80%] md:max-w-[70%]`}>
+                <div
+                  className={`rounded-lg p-2 sm:p-3 text-sm ${
+                    message.role === 'user'
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
+                  } min-w-[80px] min-h-[32px] flex items-center flex-col items-start w-full break-words`}
+                >
+                  {message.content}
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </div>
-      <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200 dark:border-gray-700">
-        <div className="flex space-x-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message..."
-            className="flex-1 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isLoading}
-            className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
+          ))}
+          {isLoading && (
+            <div className="flex justify-start mb-1.5 group w-full">
+              <div className="flex flex-col items-start max-w-[90%] sm:max-w-[80%] md:max-w-[70%]">
+                <div className="bg-gray-200 dark:bg-gray-700 rounded-lg p-2 sm:p-3 text-sm text-gray-900 dark:text-white min-w-[80px] min-h-[32px] flex items-center">
+                  <div className="flex space-x-2">
+                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
-      </form>
+
+        {/* Message Input */}
+        <form onSubmit={handleSendMessage} className="px-3 sm:px-4 py-3 border-t border-white/10 bg-white/5 backdrop-blur-lg sticky bottom-0 w-full">
+          <div className="flex space-x-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Type your message..."
+              className="flex-1 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || isLoading}
+              className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 } 
