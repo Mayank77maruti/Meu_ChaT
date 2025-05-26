@@ -1,17 +1,22 @@
-# Meu Chat – Real-Time Fullstack Chat Application
+![Screenshot from 2025-05-26 12-40-56](https://github.com/user-attachments/assets/9d20ad0d-0938-4dcb-ba0f-e2da6d66c46b)
 
+
+# Meu Chat – Real-Time Fullstack Chat Application
 Meu Chat is a full-featured, real-time chat application developed for Flipr Hackathon 27. It is designed with scalability, modular architecture, real-time performance, and a clean user experience in mind. The application supports user authentication, direct and group messaging, media sharing, and various real-time indicators.
 
+![Screenshot from 2025-05-26 12-38-42](https://github.com/user-attachments/assets/5b7a24b8-e5db-4b74-99d6-8f02b727c169)
 ---
 
 ## Live Demo
 
-🔗 [Access the deployed app on Vercel](https://meu-chat-blond.vercel.app/)
+https://meu-chat-blond.vercel.app/
 
-**Demo Credentials**
 
-* Email: `testuser@example.com`
-* Password: `password123`
+
+   **Demo Credentials**
+   
+   * Email: `testuser@example.com`
+   * Password: `password123`
 
 ---
 
@@ -27,56 +32,97 @@ Meu Chat is a full-featured, real-time chat application developed for Flipr Hack
 * [Tech Stack](#tech-stack)
 * [Architecture](#architecture)
 * [Setup Instructions](#setup-instructions)
-* [Deployment](#deployment)
-* [Challenges Faced](#challenges-faced)
-* [Contributors](#contributors)
 
 ---
 
-## ✨ Features
+Sure! Here's a clean and professional version of your **Features** section for your README file, keeping everything as you provided but formatted for clarity and readability:
 
+---
 
-*  **User Authentication**: Register, Login, Logout
-*  **User Profiles** with avatar customization
-*  **JWT-Based Session Management**
-*  **Password Recovery**
-*  **Chat Interface**: Threaded chat, timestamps, and read receipts
-*  **Typing indicators**, **online/offline status**
-*  **Delivery status**, **reactions** (emojis)
-*  **Group and Direct Chats**
-*  Image previews
-*  File attachments
-*  Link previews
-*  Voice message support
-*  **Search messages**, **chat history**
-*  Pin important messages
-*  Real-time and Email Notifications
-*  Message replies/threading
-*  **@Mentions** support
-*  **Light/Dark Mode** toggle
-*  **Performance optimized**
+## Features
+
+* **User Authentication**: Register, Login, Logout
+* **User Profiles** with avatar customization
+* **JWT-Based Session Management**
+* **Password Recovery**
+* **Chat Interface**: Threaded chat, timestamps
+* **Typing indicators**
+* **Online/Offline status**
+* **Delivery status**, **Reactions** (emojis)
+* **Group and Direct Chats**
+* **Media Support**: Image sharing and previews, Link previews, File attachments, and Voice messages support
+* **Search messages**, **Chat history**
+* **Pin important messages**
+* **Real-time Email Notifications**
+* **Video Calling and Voice Calling**
+* **Real-time Screen Share**
+* **Message replies/threading**
+* **@Mentions** support
+* **Light/Dark Mode** toggle
+* **Performance optimized**
+* **Dockerization for Scalability**
+
+---
+
+## Bonus Features
+
+* **Voice messages**
+* **Email notifications**
+* **Custom emoji/sticker packs**
+* **Voice/Video calling**
+* **Screen sharing**
+* **Chat bots/integrations**
 
 ---
 
 ## Tech Stack
 
+## Tech Stack
+
 ### Frontend
+- **Next.js 13+** - React framework with App Router
+- **React** - UI library
+- **TypeScript** - Type-safe JavaScript
+- **Tailwind CSS** - Utility-first CSS framework
+- **Heroicons** - Beautiful hand-crafted SVG icons
+- **Emoji Picker React** - Emoji picker component
 
-* **Framework**: React.js
-* **UI Library**: Tailwind CSS, Shadcn UI
-* **Routing**: Next.js App Router
-* **State Management**: React Context API
-* **Socket**: Socket.IO-client
+### Backend & Infrastructure
+- **Firebase**
+  - Authentication - User management
+  - Firestore - Real-time database
+  - Realtime Database - Real-time features (typing status, online status)
+  - Storage - File storage
+- **Nodemailer** - Email service integration
+  - Real-time message notifications
+  - HTML email templates
+  - Secure SMTP configuration
+  - Automated email delivery
+- **Zego Cloud** - Real-time communication platform
+  - High-quality audio/video calls
+  - Screen sharing capabilities
+  - Low-latency streaming
+  - Cross-platform compatibility
+  - Real-time communication SDK
 
-### Backend
+### File Handling
+- **Cloudinary** - Media storage and optimization
+  - Image uploads with automatic optimization and format conversion
+  - Video uploads with streaming capabilities
+  - Voice message storage with audio compression
+  - File attachments with secure URLs
+  - Integration using `next-cloudinary` package
+  - Automatic file type detection and handling
+  - Secure upload presets for different file types
+  - Maximum file size limit of 10MB
+  - Support for multiple upload sources (local, camera, URL)
 
-* **Server**: Node.js, Express.js
-* **Database**: MongoDB + Mongoose
-* **Auth**: JWT (JSON Web Token)
-* **WebSockets**: Socket.IO
-* **Storage**: Firebase for media
-* **Deployment**: Dockerized app hosted on **Vercel**
-
+### Development Tools
+- ESLint - Code linting
+- TypeScript - Type checking
+- Next.js App Router - File-based routing
+- React Hooks - State management
+- Firebase SDK - Backend integration
 ---
 
 ## Architecture
@@ -151,3 +197,4 @@ docker build -t meu_chat .
 docker run -p 3000:3000 meu_chat
 ```
 ---
+
