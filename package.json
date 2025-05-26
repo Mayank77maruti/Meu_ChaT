@@ -10,8 +10,9 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
-    "@types/simple-peer": "^9.11.8",
-    "@zegocloud/zego-uikit-prebuilt": "^2.14.3-beta",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "nodemailer": "^7.0.3",
     "cloudinary": "^2.6.1",
     "crypto-js": "^4.2.0",
     "emoji-picker-react": "^4.12.2",
@@ -22,11 +23,13 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-firebase-hooks": "^5.1.1",
-    "simple-peer": "^9.11.1",
     "tailwind-scrollbar-hide": "^2.0.0"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
+    "@types/cors": "^2.8.18",
+    "@types/nodemailer": "^6.4.17",
+    
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

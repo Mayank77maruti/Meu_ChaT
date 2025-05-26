@@ -19,6 +19,7 @@ import { getDatabase, ref, onValue, set, remove } from 'firebase/database';
 import CallInterface from '../../components/CallInterface';
 import CallNotification from '../../components/CallNotification';
 import { LinkPreview } from '../../components/LinkPreview';
+import { sendEmailNotification } from '../../utils/emailApi';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -316,25 +317,76 @@ const ChatPage = () => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return; // Allow sending empty message if it's a reply
-
+    
+    // Original validation - allow empty message if it's a reply
+    if (!selectedChat || (!newMessage.trim() && !replyingToMessage)) return;
+    
+    // Original reply logic
     const replyToInfo = replyingToMessage ? {
       messageId: replyingToMessage.id,
       senderId: replyingToMessage.senderId,
       text: replyingToMessage.text,
     } : undefined;
-
+  
     // Store the reply info and message before clearing states
     const currentReplyInfo = replyToInfo;
     const messageToSend = newMessage.trim();
-    
-    // Clear states immediately
+  
+    // Original state clearing
     setReplyingToMessage(null);
     setNewMessage('');
-
+  
     try {
+      // Original message sending with reply support
       await sendMessage(selectedChat, messageToSend, undefined, currentReplyInfo);
+      
+      // NEW: Email notification logic (non-blocking)
+      // Only send email notifications if we have actual message content or it's a meaningful reply
+      const shouldSendEmail = messageToSend || (currentReplyInfo && messageToSend === '');
+      
+      if (shouldSendEmail && user) {
+        try {
+          const currentChat = chats.find(c => c.id === selectedChat);
+          
+          // Only send email for 1-on-1 chats
+          if (currentChat && !currentChat.isGroup) {
+            const otherParticipantId = currentChat.participants.find(id => id !== user.uid);
+            const recipientProfile = otherParticipantId ? chatParticipants[otherParticipantId] : null;
+            
+            if (recipientProfile?.email) {
+              // Create email content based on whether it's a reply or regular message
+              let emailMessage = messageToSend;
+              
+              if (currentReplyInfo) {
+                if (messageToSend) {
+                  // Reply with additional text
+                  emailMessage = `Replying to: "${currentReplyInfo.text}"\n\n${messageToSend}`;
+                } else {
+                  // Just a reply reaction/acknowledgment
+                  emailMessage = `Replied to your message: "${currentReplyInfo.text}"`;
+                }
+              }
+              
+              await sendEmailNotification(
+                user.email || 'sender@example.com',
+                recipientProfile.email,
+                emailMessage
+              );
+              console.log('Email notification sent successfully');
+            } else {
+              console.log('Recipient email not found, skipping email notification');
+            }
+          }
+        } catch (emailError) {
+          // Email failure doesn't affect chat functionality
+          console.error('Email notification failed:', emailError);
+          // Optional: Show a non-intrusive notification
+          // toast.warn('Message sent, but email notification failed');
+        }
+      }
+      
     } catch (error) {
+      // Original error handling
       console.error('Error sending message:', error);
       alert(`Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
