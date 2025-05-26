@@ -12,12 +12,6 @@ Meu Chat is a full-featured, real-time chat application developed for Flipr Hack
 https://meu-chat-blond.vercel.app/
 
 
-
-   **Demo Credentials**
-   
-   * Email: `testuser@example.com`
-   * Password: `password123`
-
 ---
 
 ## Video Presentation
