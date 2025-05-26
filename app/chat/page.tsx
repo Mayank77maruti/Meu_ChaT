@@ -20,6 +20,7 @@ import CallInterface from '../../components/CallInterface';
 import CallNotification from '../../components/CallNotification';
 import { LinkPreview } from '../../components/LinkPreview';
 import { sendEmailNotification } from '../../utils/emailApi';
+import AIChatView from '../../components/AIChatView';
 
 const ChatPage = () => {
   const [user, loading, error] = useAuthState(auth);
@@ -67,6 +68,7 @@ const ChatPage = () => {
   const [mentionStartIndex, setMentionStartIndex] = useState(-1);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const [unreadMentions, setUnreadMentions] = useState<{[chatId: string]: number}>({});
+  const [isAIChat, setIsAIChat] = useState(false);
 
   // Close pinned message dropdown when clicking outside
   useEffect(() => {
@@ -176,7 +178,7 @@ const ChatPage = () => {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!selectedChat) return;
+    if (!selectedChat || !user || selectedChat === 'meuai') return;
 
     const unsubscribeMessages = getMessages(selectedChat, (updatedMessages) => {
       setMessages(updatedMessages);
@@ -190,7 +192,7 @@ const ChatPage = () => {
 
   // Add effect to handle message scrolling and mention notifications
   useEffect(() => {
-    if (!selectedChat || !user || !messages.length) return;
+    if (!selectedChat || !user || !messages.length || selectedChat === 'meuai') return;
 
     // Find the first message with an unread mention
     const messageWithMention = messages.find(message => message.hasUnreadMention);
@@ -236,7 +238,7 @@ const ChatPage = () => {
   }, [chats, user]);
 
   useEffect(() => {
-    if (!selectedChat || !user) return;
+    if (!selectedChat || !user || selectedChat === 'meuai') return;
 
     const currentChat = chats.find(c => c.id === selectedChat);
     if (!currentChat) return;
@@ -642,6 +644,7 @@ const ChatPage = () => {
     const updateUnreadMentions = async () => {
       const mentions: {[chatId: string]: number} = {};
       for (const chat of chats) {
+        if (chat.id === 'meuai') continue;
         const count = await getUnreadMentionsCount(chat.id, user.uid);
         if (count > 0) {
           mentions[chat.id] = count;
@@ -655,7 +658,7 @@ const ChatPage = () => {
 
   // Add effect to mark mentions as read when viewing messages
   useEffect(() => {
-    if (!selectedChat || !user || !messages.length) return;
+    if (!selectedChat || !user || !messages.length || selectedChat === 'meuai') return;
 
     const markMentionsAsRead = async () => {
       for (const message of messages) {
@@ -1144,6 +1147,15 @@ const ChatPage = () => {
     setReplyingToMessage(null);
   };
 
+  // Add this after the existing useEffect hooks
+  useEffect(() => {
+    if (selectedChat === 'meuai') {
+      setIsAIChat(true);
+    } else {
+      setIsAIChat(false);
+    }
+  }, [selectedChat]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
@@ -1184,6 +1196,31 @@ const ChatPage = () => {
             <UserSearch />
           </div>
           <div className="flex-1 overflow-y-auto">
+            {/* Add MeuAI chat option */}
+            <div
+              onClick={() => setSelectedChat('meuai')}
+              className={`p-4 hover:bg-white/5 cursor-pointer transition-all duration-200 ${
+                selectedChat === 'meuai' ? 'bg-white/10' : ''
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-600/30 to-purple-600/30 border border-white/10 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-200 truncate">
+                    MeuAI
+                  </p>
+                  <p className="text-sm text-gray-400 truncate">
+                    AI Assistant
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Existing chat list */}
             {chats.map((chat) => {
               const isGroupChat = chat.isGroup;
               const otherParticipantId = !isGroupChat ? chat.participants.find(id => id !== user?.uid) : null;
@@ -1259,183 +1296,190 @@ const ChatPage = () => {
           </div>
         </div>
 
-        {/* Chat Messages */}
-        <div className={`flex-1 flex flex-col ${isMobile ? (selectedChat ? 'block' : 'hidden') : 'block'} max-h-screen overflow-hidden relative w-full`}>
+        {/* Chat Area */}
+        <div className={`flex-1 flex flex-col ${isMobile && !selectedChat ? 'hidden' : 'flex'}`}>
           {selectedChat ? (
-            <>
-              {/* Chat Header */}
-              <div className="h-16 bg-white/5 backdrop-blur-lg border-b border-white/10 flex items-center justify-between px-4 sticky top-0 z-10 w-full">
-                <div className="flex items-center space-x-3">
-                  {isMobile && (
-                    <button 
-                      onClick={() => setSelectedChat(null)}
-                      className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
-                    >
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                  )}
-                  <div className="relative">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-600/30 to-purple-600/30 border border-white/10">
-                      {selectedChatUser?.photoURL ? (
-                        <img
-                          src={selectedChatUser.photoURL}
-                          alt={selectedChatUser.displayName || 'User'}
-                          className="w-full h-full rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-lg text-violet-400">
-                          {selectedChatUser?.displayName?.[0]?.toUpperCase() || '?'}
-                        </div>
-                      )}
-                    </div>
-                    {selectedChatUser && selectedChatUser.online && (
-                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
-                    )}
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-medium text-white">
-                      {selectedChatUser ? selectedChatUser.displayName : chats.find(c => c.id === selectedChat)?.name || 'Chat'}
-                    </h3>
-                    <p className="text-sm text-violet-300">
-                      {getTypingText() || (selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat')}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => handleStartCall('audio')}
-                    className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
-                  >
-                    <PhoneIcon className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={() => handleStartCall('video')}
-                    className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
-                  >
-                    <VideoCameraIcon className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Pinned Message */}
-              {renderPinnedMessage()}
-
-              {/* Messages and Input Container */}
-              <div className="flex-1 flex flex-col justify-end overflow-hidden w-full">
-                {/* Messages */}
-                <div className="overflow-y-auto pt-4 px-3 sm:px-4 space-y-4 scrollbar-hide pb-4 md:pb-4 pb-20 h-[calc(100vh-8rem)] w-full">
-                  {messages.map(renderMessageContent)}
-                  <div ref={messagesEndRef} />
-                  <audio ref={audioRef} className="hidden" />
-                </div>
-
-                {/* Message Input */}
-                <form onSubmit={handleSendMessage} className="px-3 sm:px-4 py-3 border-t border-white/10 bg-white/5 backdrop-blur-lg sticky bottom-0 w-full">
-                  {/* Reply Preview */}
-                  {replyingToMessage && (
-                    <div className="flex items-center justify-between bg-white/5 p-2 rounded-t-lg border-b border-white/10 -mt-4 mx-3 sm:mx-4">
-                      <div className="border-l-2 border-violet-500 pl-2 text-sm text-violet-300 flex-1">
-                        <p className="font-medium text-violet-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
-                        <p className="truncate">{replyingToMessage.text}</p>
-                      </div>
-                      <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-white/5 text-violet-400">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            isAIChat ? (
+              <AIChatView />
+            ) : (
+              <div className="flex-1 flex flex-col">
+                {/* Chat Header */}
+                <div className="h-16 bg-white/5 backdrop-blur-lg border-b border-white/10 flex items-center justify-between px-4 sticky top-0 z-10 w-full">
+                  <div className="flex items-center space-x-3">
+                    {isMobile && (
+                      <button 
+                        onClick={() => setSelectedChat(null)}
+                        className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
+                      >
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                         </svg>
                       </button>
+                    )}
+                    <div className="relative">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-600/30 to-purple-600/30 border border-white/10">
+                        {selectedChatUser?.photoURL ? (
+                          <img
+                            src={selectedChatUser.photoURL}
+                            alt={selectedChatUser.displayName || 'User'}
+                            className="w-full h-full rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-lg text-violet-400">
+                            {selectedChatUser?.displayName?.[0]?.toUpperCase() || '?'}
+                          </div>
+                        )}
+                      </div>
+                      {selectedChatUser && selectedChatUser.online && (
+                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-900"></div>
+                      )}
                     </div>
-                  )}
-                  <div className="flex space-x-2 sm:space-x-4 relative">
-                    <CldUploadWidget
-                      uploadPreset="chat_attachments"
-                      onSuccess={handleUploadSuccess}
-                      options={{
-                        resourceType: "auto",
-                        clientAllowedFormats: ["image", "video", "pdf", "audio"],
-                        maxFileSize: 10000000, // 10MB
-                        showPoweredBy: false,
-                        showSkipCropButton: true,
-                        sources: ["local", "camera", "url"],
-                        multiple: false,
-                      }}
-                    >
-                      {({ open }) => (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (currentChatRef.current) {
-                              open();
-                            }
-                          }}
-                          className="p-2 text-violet-400 hover:text-violet-300"
-                        >
-                          <PaperClipIcon className="w-6 h-6" />
-                        </button>
-                      )}
-                    </CldUploadWidget>
+                    <div>
+                      <h3 className="text-lg font-medium text-white">
+                        {selectedChatUser ? selectedChatUser.displayName : chats.find(c => c.id === selectedChat)?.name || 'Chat'}
+                      </h3>
+                      <p className="text-sm text-violet-300">
+                        {getTypingText() || (selectedChatUser ? (selectedChatUser.online ? 'Online' : 'Offline') : 'Group Chat')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <button
-                      type="button"
-                      onClick={isRecording ? stopRecording : startRecording}
-                      className={`p-2 ${
-                        isRecording 
-                          ? 'text-red-400 hover:text-red-300' 
-                          : 'text-violet-400 hover:text-violet-300'
-                      }`}
+                      onClick={() => handleStartCall('audio')}
+                      className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
                     >
-                      {isRecording ? (
-                        <StopIcon className="w-6 h-6" />
-                      ) : (
-                        <MicrophoneIcon className="w-6 h-6" />
-                      )}
+                      <PhoneIcon className="w-5 h-5" />
                     </button>
-                    <div className="flex-1 relative">
-                      <input
-                        type="text"
-                        value={newMessage}
-                        onChange={handleMessageChange}
-                        placeholder="Type a message..."
-                        className="w-full rounded-lg border border-white/10 bg-white/5 text-white placeholder-gray-400 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      />
-                      {showMentionSuggestions && mentionSuggestions.length > 0 && (
-                        <div
-                          ref={mentionDropdownRef}
-                          className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 max-h-48 overflow-y-auto"
-                        >
-                          {mentionSuggestions.map(user => (
-                            <button
-                              key={user.uid}
-                              onClick={() => handleMentionSelect(user)}
-                              className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
-                            >
-                              <div className="w-6 h-6 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
-                                <span className="text-xs text-violet-600 dark:text-violet-300">
-                                  {user.displayName[0].toUpperCase()}
-                                </span>
-                              </div>
-                              <span>{user.displayName}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
                     <button
-                      type="submit"
-                      disabled={!newMessage.trim()}
-                      className="p-2 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-lg hover:from-violet-500 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => handleStartCall('video')}
+                      className="p-2 rounded-lg hover:bg-white/5 text-violet-400"
                     >
-                      <PaperAirplaneIcon className="w-5 h-5" />
+                      <VideoCameraIcon className="w-5 h-5" />
                     </button>
                   </div>
-                </form>
+                </div>
+
+                {/* Pinned Message */}
+                {renderPinnedMessage()}
+
+                {/* Messages and Input Container */}
+                <div className="flex-1 flex flex-col justify-end overflow-hidden w-full">
+                  {/* Messages */}
+                  <div className="overflow-y-auto pt-4 px-3 sm:px-4 space-y-4 scrollbar-hide pb-4 md:pb-4 pb-20 h-[calc(100vh-8rem)] w-full">
+                    {messages.map(renderMessageContent)}
+                    <div ref={messagesEndRef} />
+                    <audio ref={audioRef} className="hidden" />
+                  </div>
+
+                  {/* Message Input */}
+                  <form onSubmit={handleSendMessage} className="px-3 sm:px-4 py-3 border-t border-white/10 bg-white/5 backdrop-blur-lg sticky bottom-0 w-full">
+                    {/* Reply Preview */}
+                    {replyingToMessage && (
+                      <div className="flex items-center justify-between bg-white/5 p-2 rounded-t-lg border-b border-white/10 -mt-4 mx-3 sm:mx-4">
+                        <div className="border-l-2 border-violet-500 pl-2 text-sm text-violet-300 flex-1">
+                          <p className="font-medium text-violet-400">{chatParticipants[replyingToMessage.senderId]?.displayName || 'Unknown User'}</p>
+                          <p className="truncate">{replyingToMessage.text}</p>
+                        </div>
+                        <button onClick={handleCancelReply} className="p-1 rounded-full hover:bg-white/5 text-violet-400">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex space-x-2 sm:space-x-4 relative">
+                      <CldUploadWidget
+                        uploadPreset="chat_attachments"
+                        onSuccess={handleUploadSuccess}
+                        options={{
+                          resourceType: "auto",
+                          clientAllowedFormats: ["image", "video", "pdf", "audio"],
+                          maxFileSize: 10000000, // 10MB
+                          showPoweredBy: false,
+                          showSkipCropButton: true,
+                          sources: ["local", "camera", "url"],
+                          multiple: false,
+                        }}
+                      >
+                        {({ open }) => (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (currentChatRef.current) {
+                                open();
+                              }
+                            }}
+                            className="p-2 text-violet-400 hover:text-violet-300"
+                          >
+                            <PaperClipIcon className="w-6 h-6" />
+                          </button>
+                        )}
+                      </CldUploadWidget>
+                      <button
+                        type="button"
+                        onClick={isRecording ? stopRecording : startRecording}
+                        className={`p-2 ${
+                          isRecording 
+                            ? 'text-red-400 hover:text-red-300' 
+                            : 'text-violet-400 hover:text-violet-300'
+                        }`}
+                      >
+                        {isRecording ? (
+                          <StopIcon className="w-6 h-6" />
+                        ) : (
+                          <MicrophoneIcon className="w-6 h-6" />
+                        )}
+                      </button>
+                      <div className="flex-1 relative">
+                        <input
+                          type="text"
+                          value={newMessage}
+                          onChange={handleMessageChange}
+                          placeholder="Type a message..."
+                          className="w-full rounded-lg border border-white/10 bg-white/5 text-white placeholder-gray-400 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        />
+                        {showMentionSuggestions && mentionSuggestions.length > 0 && (
+                          <div
+                            ref={mentionDropdownRef}
+                            className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 max-h-48 overflow-y-auto"
+                          >
+                            {mentionSuggestions.map(user => (
+                              <button
+                                key={user.uid}
+                                onClick={() => handleMentionSelect(user)}
+                                className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                              >
+                                <div className="w-6 h-6 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                                  <span className="text-xs text-violet-600 dark:text-violet-300">
+                                    {user.displayName[0].toUpperCase()}
+                                  </span>
+                                </div>
+                                <span>{user.displayName}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={!newMessage.trim()}
+                        className="p-2 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-lg hover:from-violet-500 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <PaperAirplaneIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
-            </>
+            )
           ) : (
-            <div className="flex-1 flex items-center justify-center text-violet-300">
-              Select a chat to start messaging
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <h2 className="text-2xl font-semibold text-gray-200 mb-2">Welcome to MeuChat</h2>
+                <p className="text-gray-400">Select a chat to start messaging</p>
+              </div>
             </div>
           )}
         </div>
