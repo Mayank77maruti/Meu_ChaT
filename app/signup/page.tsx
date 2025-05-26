@@ -97,7 +97,13 @@ const Signup = () => {
             
             // Update user's public key
             await updateDoc(userDocRef, {
-              publicKey: keyPair.publicKey
+              email: user.email,
+            displayName: user.displayName || user.email?.split('@')[0],
+            publicKey: keyPair.publicKey,
+            uid: uid,
+            createdAt: serverTimestamp(),
+            photoURL: user.photoURL || null,
+            provider: 'google'
             });
           }
         }
