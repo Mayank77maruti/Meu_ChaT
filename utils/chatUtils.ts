@@ -11,7 +11,8 @@ import {
   doc,
   updateDoc,
   arrayUnion,
-  getDoc
+  getDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { encryptMessage, decryptMessage } from './crypto';
 import CryptoJS from 'crypto-js';
@@ -27,6 +28,11 @@ export interface Message {
   read: boolean;
   pinned?: boolean;
   reactions?: { [emoji: string]: string[] };
+  mentions?: {
+    userId: string;
+    displayName: string;
+    notified?: boolean;
+  }[];
   attachment?: {
     type: 'image' | 'file' | 'voice' | 'video';
     url: string;
@@ -46,6 +52,7 @@ export interface Message {
     image?: string;
     siteName?: string;
   };
+  hasUnreadMention?: boolean;
 }
 
 export interface Chat {
@@ -59,6 +66,7 @@ export interface Chat {
   createdAt?: Date;
   pinnedMessage?: string;
   pinnedAt?: Date;
+  unseenMessageCount?: number;
 }
 
 export interface UserProfile {
@@ -92,10 +100,11 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
     where('participants', 'array-contains', currentUser.uid)
   );
 
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(q, async (snapshot) => {
     const chats: Chat[] = [];
-    snapshot.forEach((doc) => {
+    for (const doc of snapshot.docs) {
       const data = doc.data();
+      const unseenCount = await getUnseenMessageCount(doc.id, currentUser.uid);
       chats.push({
         id: doc.id,
         participants: data.participants,
@@ -107,8 +116,9 @@ export const getChats = (callback: (chats: Chat[]) => void) => {
         createdAt: data.createdAt?.toDate(),
         pinnedMessage: data.pinnedMessage,
         pinnedAt: data.pinnedAt?.toDate(),
+        unseenMessageCount: unseenCount
       });
-    });
+    }
     // Sort chats client-side
     chats.sort((a, b) => {
       if (!a.lastMessageTime) return 1;
@@ -142,6 +152,33 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
   const participants = chatData.participants;
   const isGroup = chatData.isGroup || false;
 
+  // Process mentions for group chats
+  let mentions: { userId: string; displayName: string; notified: boolean; }[] = [];
+  if (isGroup) {
+    const mentionRegex = /@(\w+)/g;
+    const mentionMatches = text.matchAll(mentionRegex);
+    
+    for (const match of mentionMatches) {
+      const mentionedUsername = match[1];
+      // Get user profile for the mentioned username
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('displayName', '==', mentionedUsername));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userData = userDoc.data();
+        if (participants.includes(userDoc.id)) {
+          mentions.push({
+            userId: userDoc.id,
+            displayName: userData.displayName,
+            notified: false
+          });
+        }
+      }
+    }
+  }
+
   // Check for URLs in the message
   const urls = extractUrls(text);
   let linkPreview = null;
@@ -161,6 +198,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
 
   if (linkPreview) {
     messageData.linkPreview = linkPreview;
+  }
+
+  if (mentions.length > 0) {
+    messageData.mentions = mentions;
   }
 
   // Only encrypt for direct messages (not group chats)
@@ -198,6 +239,10 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
     if (linkPreview) {
       messageData.linkPreview = linkPreview;
     }
+
+    if (mentions.length > 0) {
+      messageData.mentions = mentions;
+    }
   }
 
   if (attachment) {
@@ -210,10 +255,35 @@ export const sendMessage = async (chatId: string, text: string, attachment?: {
 
   const messageRef = await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
 
-  await updateDoc(doc(db, 'chats', chatId), {
-    lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
-    lastMessageTime: serverTimestamp(),
-  });
+  // Update chat document with mention notifications
+  if (mentions.length > 0) {
+    const chatRef = doc(db, 'chats', chatId);
+    const chatData = await getDoc(chatRef);
+    const currentData = chatData.data() || {};
+    const mentionNotifications = currentData.mentionNotifications || {};
+    
+    mentions.forEach(mention => {
+      if (!mentionNotifications[mention.userId]) {
+        mentionNotifications[mention.userId] = [];
+      }
+      mentionNotifications[mention.userId].push({
+        messageId: messageRef.id,
+        timestamp: Date.now(), // Use regular timestamp instead of serverTimestamp
+        read: false
+      });
+    });
+
+    await updateDoc(chatRef, {
+      lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
+      lastMessageTime: serverTimestamp(),
+      mentionNotifications
+    });
+  } else {
+    await updateDoc(doc(db, 'chats', chatId), {
+      lastMessage: text || (attachment ? `Sent ${attachment.type}` : ''),
+      lastMessageTime: serverTimestamp(),
+    });
+  }
 
   return messageRef.id;
 };
@@ -236,6 +306,7 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
     if (!chatDoc.exists()) return;
 
     const isGroup = chatDoc.data().isGroup || false;
+    const chatData = chatDoc.data();
 
     // Only get private key for direct messages
     let privateKeyJwk = null;
@@ -261,6 +332,15 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
       }
     }
 
+    // Track messages that need to be marked as read
+    const messagesToMarkAsRead: string[] = [];
+    const batch = writeBatch(db);
+
+    // Check for mention notifications
+    const mentionNotifications = chatData.mentionNotifications || {};
+    const userMentions = mentionNotifications[currentUser.uid] || [];
+    const unreadMentions = userMentions.filter((mention: any) => !mention.read);
+
     for (const doc of snapshot.docs) {
       const data = doc.data();
       let decryptedText = '';
@@ -272,10 +352,10 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
             ? data.senderEncryptedText 
             : data.encryptedText;
             
-          if (!encryptedText) {
-            decryptedText = '[Encrypted Message]';
-          } else {
+          if (encryptedText && privateKeyJwk) {
             decryptedText = await decryptMessage(encryptedText, privateKeyJwk);
+          } else {
+            decryptedText = '[Encrypted Message]';
           }
         } catch (error) {
           console.error('Error decrypting message:', error);
@@ -284,6 +364,14 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
       } else {
         decryptedText = data.text || '';
       }
+
+      // If message is from another user and not read, mark it for reading
+      if (data.senderId !== currentUser.uid && !data.read) {
+        messagesToMarkAsRead.push(doc.id);
+      }
+
+      // Check if this message has an unread mention
+      const hasUnreadMention = unreadMentions.some((mention: any) => mention.messageId === doc.id);
 
       messages.push({
         id: doc.id,
@@ -296,9 +384,38 @@ export const getMessages = (chatId: string, callback: (messages: Message[]) => v
         reactions: data.reactions || {},
         attachment: data.attachment,
         replyTo: data.replyTo,
-        linkPreview: data.linkPreview
+        linkPreview: data.linkPreview,
+        hasUnreadMention
       });
     }
+
+    // Mark messages as read in batch
+    if (messagesToMarkAsRead.length > 0) {
+      messagesToMarkAsRead.forEach(messageId => {
+        const messageRef = doc(db, 'chats', chatId, 'messages', messageId);
+        batch.update(messageRef, { read: true });
+      });
+    }
+
+    // Mark all mention notifications as read
+    if (unreadMentions.length > 0) {
+      const updatedMentions = userMentions.map((mention: any) => ({
+        ...mention,
+        read: true
+      }));
+      
+      const updatedNotifications = {
+        ...mentionNotifications,
+        [currentUser.uid]: updatedMentions
+      };
+      
+      const chatRef = doc(db, 'chats', chatId);
+      batch.update(chatRef, { mentionNotifications: updatedNotifications });
+    }
+
+    // Commit all updates
+    await batch.commit();
+
     callback(messages);
   });
 };
@@ -483,6 +600,7 @@ export const searchGroups = async (searchTerm: string): Promise<Chat[]> => {
         createdAt: data.createdAt?.toDate(),
         pinnedMessage: data.pinnedMessage,
         pinnedAt: data.pinnedAt?.toDate(),
+        unseenMessageCount: data.unseenMessageCount || 0,
       });
     }
   });
@@ -565,4 +683,50 @@ const fetchLinkPreview = async (url: string) => {
     console.error('Error fetching link preview:', error);
     return null;
   }
+};
+
+export const getUnseenMessageCount = async (chatId: string, userId: string): Promise<number> => {
+  const messagesRef = collection(db, 'chats', chatId, 'messages');
+  const q = query(
+    messagesRef,
+    where('senderId', '!=', userId),
+    where('read', '==', false)
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.size;
+};
+
+// Add function to mark mention as read
+export const markMentionAsRead = async (chatId: string, userId: string, messageId: string) => {
+  const chatRef = doc(db, 'chats', chatId);
+  const chatDoc = await getDoc(chatRef);
+  
+  if (!chatDoc.exists()) return;
+  
+  const chatData = chatDoc.data();
+  const mentionNotifications = chatData.mentionNotifications || {};
+  
+  if (mentionNotifications[userId]) {
+    mentionNotifications[userId] = mentionNotifications[userId].map((notification: any) => {
+      if (notification.messageId === messageId) {
+        return { ...notification, read: true };
+      }
+      return notification;
+    });
+    
+    await updateDoc(chatRef, { mentionNotifications });
+  }
+};
+
+// Add function to get unread mentions count
+export const getUnreadMentionsCount = async (chatId: string, userId: string): Promise<number> => {
+  const chatDoc = await getDoc(doc(db, 'chats', chatId));
+  if (!chatDoc.exists()) return 0;
+  
+  const chatData = chatDoc.data();
+  const mentionNotifications = chatData.mentionNotifications || {};
+  const userNotifications = mentionNotifications[userId] || [];
+  
+  return userNotifications.filter((notification: any) => !notification.read).length;
 }; 

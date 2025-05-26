@@ -193,7 +193,7 @@ export default function Settings({ isOpen, onClose }: { isOpen: boolean; onClose
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={!isEditing || isLoading}
-                  className="flex-1 p-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 p-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500"
                 />
                 <button
                   type="button"
@@ -209,7 +209,7 @@ export default function Settings({ isOpen, onClose }: { isOpen: boolean; onClose
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full mt-4 px-4 py-2 rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                className="w-full mt-4 px-4 py-2 rounded-md bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-500 hover:to-purple-500 disabled:opacity-50"
               >
                 {isLoading ? 'Saving...' : 'Save Changes'}
               </button>
