@@ -9,7 +9,7 @@ Meu Chat is a full-featured, real-time chat application developed for Flipr Hack
 
 ## Live Demo
 
-https://meu-chat-blond.vercel.app/
+https://meu-chat-blond.vercel.app/  
 
 
 ---
