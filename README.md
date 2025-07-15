@@ -171,7 +171,7 @@ Sure! Here's a clean and professional version of your **Features** section for y
 3. **Install dependencies**
 
    ```bash
-   npm install
+   npm install  
    ```
 
 4. **Start the app**
